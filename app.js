@@ -2,7 +2,6 @@ const express = require('express');
 const path = require('path');
 const { addonBuilder, getRouter } = require('stremio-addon-sdk');
 
-// Resolve project root regardless of where this file is called from
 const ROOT_DIR = path.resolve(__dirname);
 const { getTorBoxDownloads } = require('./src/torbox');
 const { buildCatalog, buildMeta, buildStreams } = require('./src/builder');
@@ -19,45 +18,74 @@ app.use((req, res, next) => {
   next();
 });
 
-// ─── MANIFEST ────────────────────────────────────────────────────────────────
-const manifest = {
-  id: 'community.torbox.catalog',
-  version: '1.1.0',
-  name: 'TorBox Catalog',
-  description: 'Seu catálogo pessoal do TorBox com metadados em Português BR do TMDB.',
-  logo: 'https://torbox.app/favicon.ico',
-  background: 'https://i.imgur.com/wEYpOCO.jpg',
-  resources: ['catalog', 'meta', 'stream'],
-  types: ['movie', 'series'],
-  idPrefixes: ['torbox:'],
-  catalogs: [
-    {
-      id: 'torbox-movies',
-      type: 'movie',
-      name: 'TorBox - Filmes',
-      extra: [
-        { name: 'skip', isRequired: false },
-        { name: 'search', isRequired: false },
-      ],
+// ─── BASE MANIFEST (sem config) ───────────────────────────────────────────────
+// configurationRequired: true  → Stremio mostra botão "Configurar"
+// configureUrl                 → ao clicar "Configurar", abre nossa página HTML
+function getBaseManifest(baseUrl) {
+  return {
+    id: 'community.torbox.catalog',
+    version: '1.1.0',
+    name: 'TorBox Catalog',
+    description: 'Seu catálogo pessoal do TorBox com metadados em Português BR do TMDB.',
+    logo: 'https://torbox.app/favicon.ico',
+    background: 'https://raw.githubusercontent.com/adrianoBP/torbox-stremio/main/bg.jpg',
+    resources: ['catalog', 'meta', 'stream'],
+    types: ['movie', 'series'],
+    idPrefixes: ['torbox:'],
+    catalogs: [],
+    behaviorHints: {
+      configurable: true,
+      configurationRequired: true,
     },
-    {
-      id: 'torbox-series',
-      type: 'series',
-      name: 'TorBox - Séries',
-      extra: [
-        { name: 'skip', isRequired: false },
-        { name: 'search', isRequired: false },
-      ],
+    // Stremio abre esta URL quando o usuário clica em "Configurar"
+    configureUrl: `${baseUrl}/configure`,
+  };
+}
+
+// ─── MANIFEST CONFIGURADO (com config no token) ───────────────────────────────
+// configurationRequired: false → Stremio mostra botão "Instalar" ✅
+function getConfiguredManifest() {
+  return {
+    id: 'community.torbox.catalog',
+    version: '1.1.0',
+    name: 'TorBox Catalog',
+    description: 'Seu catálogo pessoal do TorBox com metadados em Português BR do TMDB.',
+    logo: 'https://torbox.app/favicon.ico',
+    background: 'https://raw.githubusercontent.com/adrianoBP/torbox-stremio/main/bg.jpg',
+    resources: ['catalog', 'meta', 'stream'],
+    types: ['movie', 'series'],
+    idPrefixes: ['torbox:'],
+    catalogs: [
+      {
+        id: 'torbox-movies',
+        type: 'movie',
+        name: 'TorBox - Filmes',
+        extra: [
+          { name: 'skip', isRequired: false },
+          { name: 'search', isRequired: false },
+        ],
+      },
+      {
+        id: 'torbox-series',
+        type: 'series',
+        name: 'TorBox - Séries',
+        extra: [
+          { name: 'skip', isRequired: false },
+          { name: 'search', isRequired: false },
+        ],
+      },
+    ],
+    // SEM configurationRequired → Stremio exibe "Instalar" normalmente
+    behaviorHints: {
+      configurable: true,
     },
-  ],
-  behaviorHints: { configurable: true, configurationRequired: true },
-};
+  };
+}
 
 // ─── CONFIG DECODE ────────────────────────────────────────────────────────────
 function decodeConfig(str) {
   try {
-    // Restore base64url padding
-    const padded = str + '=='.slice(0, (4 - str.length % 4) % 4);
+    const padded = str + '=='.slice(0, (4 - (str.length % 4)) % 4);
     const standard = padded.replace(/-/g, '+').replace(/_/g, '/');
     return JSON.parse(Buffer.from(standard, 'base64').toString('utf8'));
   } catch {
@@ -67,7 +95,7 @@ function decodeConfig(str) {
 
 // ─── ADDON BUILDER ────────────────────────────────────────────────────────────
 function buildAddon(config) {
-  const builder = new addonBuilder({ ...manifest });
+  const builder = new addonBuilder(getConfiguredManifest());
 
   builder.defineCatalogHandler(async ({ type, id, extra }) => {
     const { torboxApiKey, tmdbApiKey, sortBy = 'data_adicao' } = config;
@@ -130,26 +158,26 @@ function buildAddon(config) {
   return builder.getInterface();
 }
 
-// ─── ROUTES ───────────────────────────────────────────────────────────────────
+// ─── ROTAS ────────────────────────────────────────────────────────────────────
 
-// Root → configure
 app.get('/', (req, res) => res.redirect('/configure'));
 
-// Configure page
+// Página de configuração HTML
 app.get('/configure', (req, res) => {
   res.sendFile(path.join(ROOT_DIR, 'configure.html'));
 });
 
-// Bare manifest (no config)
+// Manifest raiz — sem config, mostra botão "Configurar" no Stremio
 app.get('/manifest.json', (req, res) => {
-  res.json({ ...manifest });
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  res.json(getBaseManifest(baseUrl));
 });
 
-// ── Configured routes /:configBase64/... ─────────────────────────────────────
+// ── Rotas configuradas: /:configBase64/manifest.json etc. ────────────────────
 app.use('/:configBase64', (req, res, next) => {
   const { configBase64 } = req.params;
 
-  // Skip reserved paths
+  // Ignorar caminhos reservados
   if (['configure', 'favicon.ico', 'static'].includes(configBase64)) return next();
   if (configBase64.includes('.') && !configBase64.includes('manifest')) return next();
 
@@ -157,7 +185,7 @@ app.use('/:configBase64', (req, res, next) => {
   const addonInterface = buildAddon(config);
   const addonRouter = getRouter(addonInterface);
 
-  // Strip config segment from URL so addon router sees /manifest.json, /catalog/..., etc.
+  // Remove o prefixo de config da URL antes de passar ao router do addon
   const stripped = req.originalUrl.replace(`/${configBase64}`, '') || '/';
   req.url = stripped;
 
