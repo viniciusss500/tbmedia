@@ -106,7 +106,7 @@ function buildAddon(config) {
     if (cached) return cached;
 
     try {
-      const downloads = await getTorBoxDownloads(torboxApiKey, type);
+      const downloads = await getTorBoxDownloads(torboxApiKey);
       const metas = await buildCatalog(downloads, tmdbApiKey, type, sortBy, extra);
       const result = { metas };
       cache.set(cacheKey, result);
