@@ -3,7 +3,7 @@ const { searchMetadata, getMetadata } = require('./tmdb');
 const { guessMediaInfo } = require('./parser');
 const NodeCache = require('node-cache');
 
-const matchCache = new NodeCache({ stdTTL: 86400 });
+const matchCache = new NodeCache({ stdTTL: 86400 }); // 24h
 
 /**
  * Match a single TorBox item to TMDB.
@@ -11,32 +11,25 @@ const matchCache = new NodeCache({ stdTTL: 86400 });
 async function matchItem(item, tmdbApiKey, type) {
   const name = item.name || item.filename || '';
   const cacheKey = `match:${type}:${name}`;
+
   const cached = matchCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
   const info = guessMediaInfo(name);
-  if (!info) {
-    console.log(`[Parser] No info extracted from: "${name}"`);
+  if (!info || (type === 'movie' && info.isSeries) || (type === 'series' && !info.isSeries)) {
     matchCache.set(cacheKey, null);
     return null;
   }
 
-  console.log(`[Parser] "${name}" → title:"${info.title}" year:${info.year} series:${info.isSeries}`);
-
-  // Filter by type
-  if (type === 'movie'  && info.isSeries) { matchCache.set(cacheKey, null); return null; }
-  if (type === 'series' && !info.isSeries) { matchCache.set(cacheKey, null); return null; }
-
   try {
-    const tmdbType = type === 'series' ? 'series' : 'movie';
-    const result = await searchMetadata(tmdbApiKey, info.title, tmdbType, info.year);
+    const result = await searchMetadata(tmdbApiKey, info.title, type === 'series' ? 'series' : 'movie', info.year);
     if (!result) {
-      console.log(`[TMDB] No result for: "${info.title}" (${info.year})`);
+      console.log(`[TMDB] No result: "${info.title}"`);
       matchCache.set(cacheKey, null);
       return null;
     }
 
-    console.log(`[TMDB] Matched "${info.title}" → "${result.title || result.name}" (id:${result.id})`);
+    console.log(`[TMDB] "${info.title}" → "${result.title || result.name}" (${result.id})`);
 
     const meta = {
       id: `torbox:${type}:${result.id}`,
@@ -46,44 +39,63 @@ async function matchItem(item, tmdbApiKey, type) {
       releaseInfo: (result.release_date || result.first_air_date || '').split('-')[0],
       released: result.release_date || result.first_air_date,
       tmdbId: result.id,
-      popularity: result.popularity,
       torboxItem: item,
     };
 
     matchCache.set(cacheKey, meta);
     return meta;
   } catch (err) {
-    console.error(`[TMDB] Error for "${name}":`, err.message);
+    console.error(`[TMDB] Error "${name}": ${err.message}`);
     matchCache.set(cacheKey, null);
     return null;
   }
 }
 
 /**
- * Build catalog from TorBox downloads matched to TMDB.
+ * Build catalog — filters by type BEFORE hitting TMDB to avoid timeout.
  */
 async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra) {
   const skip     = parseInt(extra?.skip) || 0;
   const search   = extra?.search?.toLowerCase();
   const PAGE_SIZE = 50;
 
-  console.log(`[Catalog] Building type=${type} downloads=${downloads.length} sortBy=${sortBy}`);
+  // ── STEP 1: Filter by type using only the parser (no network calls) ──────
+  // This reduces 1048 items to only the relevant type before any TMDB requests
+  const relevant = [];
+  const dedupTitles = new Map(); // title → item (pick one representative per unique title)
 
-  // Match in parallel with concurrency limit
-  const CONCURRENCY = 5;
-  const results = [];
-  for (let i = 0; i < downloads.length; i += CONCURRENCY) {
-    const batch = downloads.slice(i, i + CONCURRENCY);
-    const matched = await Promise.all(batch.map(item => matchItem(item, tmdbApiKey, type)));
-    results.push(...matched);
+  for (const item of downloads) {
+    const name = item.name || item.filename || '';
+    const info = guessMediaInfo(name);
+    if (!info) continue;
+    if (type === 'movie'  && info.isSeries)  continue;
+    if (type === 'series' && !info.isSeries) continue;
+
+    // Deduplicate by title+year at parse level to avoid redundant TMDB calls
+    const dedupeKey = `${info.title}::${info.year}`;
+    if (!dedupTitles.has(dedupeKey)) {
+      dedupTitles.set(dedupeKey, { item, info });
+      relevant.push({ item, info });
+    }
   }
 
-  const validResults = results.filter(Boolean);
-  console.log(`[Catalog] Matched ${validResults.length}/${downloads.length} items to TMDB`);
+  console.log(`[Catalog] type=${type} | raw=${downloads.length} → after filter+dedup=${relevant.length}`);
 
-  // Deduplicate by TMDB id
+  // ── STEP 2: TMDB lookup only for the filtered+deduped set ────────────────
+  const CONCURRENCY = 10;
+  const results = [];
+
+  for (let i = 0; i < relevant.length; i += CONCURRENCY) {
+    const batch = relevant.slice(i, i + CONCURRENCY);
+    const matched = await Promise.all(
+      batch.map(({ item, info }) => matchItem(item, tmdbApiKey, type))
+    );
+    results.push(...matched.filter(Boolean));
+  }
+
+  // ── STEP 3: Deduplicate by TMDB id ───────────────────────────────────────
   const seen = new Map();
-  for (const meta of validResults) {
+  for (const meta of results) {
     if (!seen.has(meta.id)) {
       seen.set(meta.id, { ...meta, torboxItems: [meta.torboxItem] });
     } else {
@@ -93,17 +105,17 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra) {
 
   let metas = Array.from(seen.values());
 
+  // ── STEP 4: Search filter ─────────────────────────────────────────────────
   if (search) {
     metas = metas.filter(m => m.name?.toLowerCase().includes(search));
   }
 
-  // Sort
+  // ── STEP 5: Sort ─────────────────────────────────────────────────────────
   if (sortBy === 'data_lancamento') {
     metas.sort((a, b) => (b.released || '').localeCompare(a.released || ''));
   } else if (sortBy === 'titulo') {
     metas.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
   } else {
-    // data_adicao — by TorBox created_at
     metas.sort((a, b) => {
       const aDate = a.torboxItems?.[0]?.created_at || '';
       const bDate = b.torboxItems?.[0]?.created_at || '';
@@ -112,10 +124,9 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra) {
   }
 
   const paginated = metas.slice(skip, skip + PAGE_SIZE);
-  console.log(`[Catalog] Returning ${paginated.length} items (skip=${skip})`);
+  console.log(`[Catalog] Returning ${paginated.length} items (skip=${skip}, total=${metas.length})`);
 
-  // Strip internal fields
-  return paginated.map(({ torboxItem, torboxItems, tmdbId, popularity, ...rest }) => rest);
+  return paginated.map(({ torboxItem, torboxItems, tmdbId, ...rest }) => rest);
 }
 
 /**
@@ -136,8 +147,9 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
     const name = item.name || item.filename || '';
     const info = guessMediaInfo(name);
     if (!info) continue;
+    if (type === 'movie'  && info.isSeries)  continue;
+    if (type === 'series' && !info.isSeries) continue;
 
-    // Match against requested TMDB id
     const tmdbResult = await searchMetadata(
       tmdbApiKey, info.title,
       type === 'series' ? 'series' : 'movie',
@@ -146,13 +158,11 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
 
     if (!tmdbResult || String(tmdbResult.id) !== String(tmdbId)) continue;
 
-    // For series, filter by season/episode
     if (type === 'series') {
-      if (info.season  && String(info.season)  !== String(season))  continue;
-      if (info.episode && String(info.episode) !== String(episode)) continue;
+      if (season  && info.season  && String(info.season)  !== String(season))  continue;
+      if (episode && info.episode && String(info.episode) !== String(episode)) continue;
     }
 
-    // Get video files
     const files = await getTorBoxFiles(torboxApiKey, item.source, item.id);
     const videoFiles = files.filter(f => isVideoFile(f.name || f.short_name));
 
@@ -167,22 +177,17 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
             description: `📁 ${file.name || item.name}\n💾 ${formatBytes(file.size)}\n⚡ ${item.source}`,
             behaviorHints: { notWebReady: false },
           });
-        } catch (err) {
-          console.error('[Stream] link error:', err.message);
-        }
+        } catch {}
       }
     } else {
-      // No separate files — try the whole item
       try {
         const url = await getTorBoxStreamLink(torboxApiKey, item.source, item.id, 0);
-        if (url) {
-          streams.push({
-            url,
-            name: `TorBox\n${extractQuality(item.name)}`,
-            description: `📁 ${item.name}\n⚡ ${item.source}`,
-            behaviorHints: { notWebReady: false },
-          });
-        }
+        if (url) streams.push({
+          url,
+          name: `TorBox\n${extractQuality(item.name)}`,
+          description: `📁 ${item.name}\n⚡ ${item.source}`,
+          behaviorHints: { notWebReady: false },
+        });
       } catch {}
     }
   }
