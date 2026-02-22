@@ -13,7 +13,7 @@
       --border: #2a2a35;
       --accent: #7c3aed;
       --accent-hover: #6d28d9;
-      --accent-glow: rgba(124, 58, 237, 0.35);
+      --accent-glow: rgba(124,58,237,0.35);
       --text: #e8e8f0;
       --muted: #9090a8;
       --input-bg: #0f0f13;
@@ -31,8 +31,6 @@
       justify-content: center;
       padding: 1.5rem;
     }
-
-    /* Background decoration */
     body::before {
       content: '';
       position: fixed;
@@ -50,20 +48,17 @@
       padding: 2.5rem;
       width: 100%;
       max-width: 480px;
-      position: relative;
       box-shadow: 0 25px 60px rgba(0,0,0,0.5);
     }
 
-    /* Header */
     .logo-wrap {
       display: flex;
       align-items: center;
       gap: 0.85rem;
-      margin-bottom: 0.5rem;
+      margin-bottom: 0.4rem;
     }
     .logo-wrap img {
-      width: 42px;
-      height: 42px;
+      width: 42px; height: 42px;
       border-radius: 10px;
       border: 1px solid var(--border);
     }
@@ -77,21 +72,13 @@
     .subtitle {
       color: var(--muted);
       font-size: 0.85rem;
-      margin-bottom: 2rem;
+      margin-bottom: 1.75rem;
       line-height: 1.5;
     }
+    .divider { height: 1px; background: var(--border); margin: 1.25rem 0 1.5rem; }
 
-    /* Divider */
-    .divider {
-      height: 1px;
-      background: var(--border);
-      margin: 1.5rem 0;
-    }
-
-    /* Form */
-    .field {
-      margin-bottom: 1.25rem;
-    }
+    /* Form fields */
+    .field { margin-bottom: 1.2rem; }
     label {
       display: flex;
       align-items: center;
@@ -101,7 +88,7 @@
       color: var(--muted);
       text-transform: uppercase;
       letter-spacing: 0.06em;
-      margin-bottom: 0.5rem;
+      margin-bottom: 0.45rem;
     }
     label .req { color: var(--accent); }
 
@@ -117,42 +104,31 @@
       transition: border-color 0.2s, box-shadow 0.2s;
       -webkit-appearance: none;
     }
-    input[type="text"]:focus, input[type="password"]:focus, select:focus {
+    input:focus, select:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 3px var(--accent-glow);
     }
+    input.invalid { border-color: var(--error) !important; box-shadow: 0 0 0 3px rgba(239,68,68,0.2) !important; }
     select option { background: #1e1e2a; }
 
-    .field-hint {
-      font-size: 0.75rem;
-      color: var(--muted);
-      margin-top: 0.35rem;
-    }
+    .field-hint { font-size: 0.75rem; color: var(--muted); margin-top: 0.35rem; }
     .field-hint a { color: #818cf8; text-decoration: none; }
     .field-hint a:hover { text-decoration: underline; }
 
-    /* Password toggle */
     .input-wrap { position: relative; }
     .input-wrap input { padding-right: 2.8rem; }
     .toggle-btn {
-      position: absolute;
-      right: 0.7rem;
-      top: 50%;
+      position: absolute; right: 0.7rem; top: 50%;
       transform: translateY(-50%);
-      background: none;
-      border: none;
-      cursor: pointer;
-      color: var(--muted);
-      font-size: 1.1rem;
-      padding: 0.2rem;
-      line-height: 1;
+      background: none; border: none; cursor: pointer;
+      color: var(--muted); font-size: 1.1rem; padding: 0.2rem; line-height: 1;
     }
     .toggle-btn:hover { color: var(--text); }
 
-    /* Install button */
+    /* Primary install button */
     .btn-install {
       width: 100%;
-      padding: 0.85rem;
+      padding: 0.9rem;
       background: var(--accent);
       color: #fff;
       border: none;
@@ -161,99 +137,121 @@
       font-weight: 700;
       cursor: pointer;
       transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
-      margin-top: 0.5rem;
+      margin-top: 0.25rem;
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 0.5rem;
     }
-    .btn-install:hover {
-      background: var(--accent-hover);
-      box-shadow: 0 0 20px var(--accent-glow);
-    }
+    .btn-install:hover { background: var(--accent-hover); box-shadow: 0 0 20px var(--accent-glow); }
     .btn-install:active { transform: scale(0.98); }
-    .btn-install:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: none;
-      box-shadow: none;
-    }
 
-    /* URL box */
-    .url-section {
+    /* Result section */
+    .result-section {
       display: none;
       margin-top: 1.5rem;
-      padding: 1rem;
-      background: rgba(124,58,237,0.08);
-      border: 1px solid rgba(124,58,237,0.3);
-      border-radius: 0.75rem;
+      flex-direction: column;
+      gap: 0.75rem;
     }
-    .url-section.show { display: block; }
-    .url-label {
-      font-size: 0.78rem;
-      font-weight: 700;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 0.5rem;
-    }
-    .url-box {
+    .result-section.show { display: flex; }
+
+    /* Big install buttons */
+    .install-btn {
       display: flex;
-      gap: 0.5rem;
       align-items: center;
+      gap: 0.75rem;
+      padding: 0.85rem 1rem;
+      border-radius: 0.7rem;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 0.95rem;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+      width: 100%;
+      text-align: left;
     }
-    .url-text {
+    .install-btn .icon {
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem;
+      flex-shrink: 0;
+    }
+    .install-btn .label { flex: 1; }
+    .install-btn .label small {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 400;
+      opacity: 0.75;
+      margin-top: 1px;
+    }
+    .install-btn .arrow { opacity: 0.5; font-size: 1rem; }
+
+    /* Stremio desktop */
+    .btn-desktop {
+      background: linear-gradient(135deg, #7c3aed, #5b21b6);
+      color: #fff;
+    }
+    .btn-desktop:hover { background: linear-gradient(135deg, #6d28d9, #4c1d95); box-shadow: 0 4px 20px rgba(124,58,237,0.4); transform: translateY(-1px); }
+    .btn-desktop .icon { background: rgba(255,255,255,0.15); }
+
+    /* Stremio Web */
+    .btn-web {
+      background: rgba(255,255,255,0.04);
+      color: var(--text);
+      border: 1px solid var(--border) !important;
+    }
+    .btn-web:hover { background: rgba(255,255,255,0.08); border-color: #818cf8 !important; transform: translateY(-1px); }
+    .btn-web .icon { background: rgba(124,58,237,0.2); }
+
+    /* URL manual copy */
+    .url-row {
+      background: rgba(0,0,0,0.3);
+      border: 1px solid var(--border);
+      border-radius: 0.6rem;
+      padding: 0.6rem 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .url-row span {
       flex: 1;
       font-family: 'Menlo', 'Consolas', monospace;
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       color: #a78bfa;
       word-break: break-all;
-      background: rgba(0,0,0,0.3);
-      padding: 0.5rem 0.75rem;
-      border-radius: 0.4rem;
-      border: 1px solid var(--border);
+      overflow: hidden;
     }
     .btn-copy {
       background: none;
       border: 1px solid var(--border);
-      border-radius: 0.4rem;
+      border-radius: 0.35rem;
       color: var(--muted);
       cursor: pointer;
-      padding: 0.45rem 0.6rem;
-      font-size: 0.9rem;
+      padding: 0.35rem 0.55rem;
+      font-size: 0.8rem;
       transition: all 0.2s;
       white-space: nowrap;
+      flex-shrink: 0;
     }
     .btn-copy:hover { border-color: var(--accent); color: var(--accent); }
 
-    .btn-stremio {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      width: 100%;
-      margin-top: 0.75rem;
-      padding: 0.65rem;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid var(--border);
-      border-radius: 0.5rem;
-      color: var(--text);
-      text-decoration: none;
-      font-size: 0.88rem;
-      font-weight: 600;
-      transition: background 0.2s, border-color 0.2s;
+    .security-note {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.5;
     }
-    .btn-stremio:hover { background: rgba(255,255,255,0.08); border-color: #818cf8; }
 
     /* Toast */
     .toast {
       position: fixed;
-      bottom: 1.5rem;
-      right: 1.5rem;
+      bottom: 1.5rem; right: 1.5rem;
       background: var(--card);
-      border: 1px solid var(--border);
+      border: 1px solid var(--success);
       border-radius: 0.6rem;
-      padding: 0.7rem 1.1rem;
+      padding: 0.65rem 1rem;
       font-size: 0.88rem;
       color: var(--success);
       opacity: 0;
@@ -265,27 +263,22 @@
     }
     .toast.show { opacity: 1; transform: translateY(0); }
 
-    /* Validation states */
-    input.invalid, select.invalid { border-color: var(--error) !important; }
-
-    /* Footer */
     .footer {
       text-align: center;
-      margin-top: 1.25rem;
+      margin-top: 1.5rem;
       font-size: 0.76rem;
       color: var(--muted);
     }
-    .footer a { color: #818cf8; text-decoration: none; }
   </style>
 </head>
 <body>
-
 <div class="card">
+
   <div class="logo-wrap">
     <img src="https://torbox.app/favicon.ico" alt="TorBox" onerror="this.style.display='none'" />
     <h1>TorBox Catalog</h1>
   </div>
-  <p class="subtitle">Configure o addon com suas chaves de API para exibir seu catálogo pessoal no Stremio.</p>
+  <p class="subtitle">Configure o addon para exibir seu catálogo pessoal do TorBox no Stremio com metadados em Português BR.</p>
 
   <div class="divider"></div>
 
@@ -293,22 +286,18 @@
     <label>TorBox API Key <span class="req">*</span></label>
     <div class="input-wrap">
       <input type="password" id="torboxApiKey" placeholder="tb-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" />
-      <button class="toggle-btn" type="button" onclick="toggleVis('torboxApiKey', this)">👁</button>
+      <button class="toggle-btn" type="button" onclick="toggleVis('torboxApiKey',this)">👁</button>
     </div>
-    <p class="field-hint">
-      Obtenha em <a href="https://torbox.app/settings/api" target="_blank">torbox.app/settings/api</a>
-    </p>
+    <p class="field-hint">Obtenha em <a href="https://torbox.app/settings/api" target="_blank">torbox.app/settings/api</a></p>
   </div>
 
   <div class="field">
     <label>TMDB API Key (v3) <span class="req">*</span></label>
     <div class="input-wrap">
       <input type="password" id="tmdbApiKey" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" />
-      <button class="toggle-btn" type="button" onclick="toggleVis('tmdbApiKey', this)">👁</button>
+      <button class="toggle-btn" type="button" onclick="toggleVis('tmdbApiKey',this)">👁</button>
     </div>
-    <p class="field-hint">
-      Obtenha em <a href="https://www.themoviedb.org/settings/api" target="_blank">themoviedb.org/settings/api</a>
-    </p>
+    <p class="field-hint">Obtenha em <a href="https://www.themoviedb.org/settings/api" target="_blank">themoviedb.org/settings/api</a></p>
   </div>
 
   <div class="field">
@@ -320,27 +309,45 @@
     </select>
   </div>
 
-  <button class="btn-install" id="installBtn" onclick="install()">
-    <span>⚡</span> Gerar link de instalação
+  <button class="btn-install" onclick="generate()">
+    ⚡ Instalar Addon
   </button>
 
-  <div class="url-section" id="urlSection">
-    <div class="url-label">🔗 URL do Addon</div>
-    <div class="url-box">
-      <div class="url-text" id="addonUrl"></div>
-      <button class="btn-copy" onclick="copyUrl()">Copiar</button>
-    </div>
-    <a class="btn-stremio" id="stremioLink" href="#">
-      <span>▶</span> Abrir no Stremio
+  <!-- Result: shown after generate() -->
+  <div class="result-section" id="resultSection">
+
+    <!-- Desktop Stremio -->
+    <a class="install-btn btn-desktop" id="btnDesktop" href="#">
+      <div class="icon">▶</div>
+      <div class="label">
+        Instalar no Stremio
+        <small>Abre o app desktop e instala automaticamente</small>
+      </div>
+      <span class="arrow">›</span>
     </a>
-    <p style="font-size:0.73rem;color:var(--muted);margin-top:0.6rem;text-align:center;">
-      Suas chaves ficam codificadas na URL e nunca são enviadas ao servidor de forma legível.
+
+    <!-- Stremio Web -->
+    <a class="install-btn btn-web" id="btnWeb" href="#" target="_blank">
+      <div class="icon">🌐</div>
+      <div class="label">
+        Instalar via Stremio Web
+        <small>Para usar no navegador em web.stremio.com</small>
+      </div>
+      <span class="arrow">›</span>
+    </a>
+
+    <!-- Manual URL -->
+    <div class="url-row">
+      <span id="manifestUrl"></span>
+      <button class="btn-copy" onclick="copyUrl()">Copiar URL</button>
+    </div>
+
+    <p class="security-note">
+      🔒 Suas chaves são codificadas na URL e nunca armazenadas no servidor.
     </p>
   </div>
 
-  <div class="footer">
-    Addon open-source — Stremio + TorBox + TMDB
-  </div>
+  <div class="footer">TorBox Catalog Addon • Stremio + TorBox + TMDB</div>
 </div>
 
 <div class="toast" id="toast">✓ URL copiada!</div>
@@ -354,42 +361,48 @@
   }
 
   function encodeConfig(cfg) {
+    // base64url encode (no padding, url-safe chars)
     return btoa(JSON.stringify(cfg))
-      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
   }
 
-  function install() {
+  function generate() {
     const torboxApiKey = document.getElementById('torboxApiKey').value.trim();
     const tmdbApiKey   = document.getElementById('tmdbApiKey').value.trim();
     const sortBy       = document.getElementById('sortBy').value;
 
+    // Validate
     let valid = true;
-    ;[['torboxApiKey', torboxApiKey], ['tmdbApiKey', tmdbApiKey]].forEach(([id, val]) => {
+    [['torboxApiKey', torboxApiKey], ['tmdbApiKey', tmdbApiKey]].forEach(([id, val]) => {
       const el = document.getElementById(id);
       if (!val) { el.classList.add('invalid'); valid = false; }
       else el.classList.remove('invalid');
     });
     if (!valid) return;
 
-    const config = { torboxApiKey, tmdbApiKey, sortBy };
-    const encoded = encodeConfig(config);
+    const encoded     = encodeConfig({ torboxApiKey, tmdbApiKey, sortBy });
+    const origin      = window.location.origin;
+    const manifestUrl = `${origin}/${encoded}/manifest.json`;
 
-    const baseUrl = window.location.origin;
-    const manifestUrl = `${baseUrl}/${encoded}/manifest.json`;
-    const stremioUrl  = `stremio://${window.location.host}/${encoded}/manifest.json`;
+    // stremio:// protocol — correct format: stremio://[full manifest url without https://]
+    const stremioProtocol = `stremio://${manifestUrl.replace(/^https?:\/\//, '')}`;
 
-    document.getElementById('addonUrl').textContent = manifestUrl;
-    document.getElementById('stremioLink').href = stremioUrl;
-    document.getElementById('urlSection').classList.add('show');
+    // Stremio Web install URL
+    const stremioWeb = `https://web.stremio.com/#?addon=${encodeURIComponent(manifestUrl)}`;
 
-    document.getElementById('installBtn').textContent = '✓ Link gerado!';
-    setTimeout(() => {
-      document.getElementById('installBtn').innerHTML = '<span>⚡</span> Gerar link de instalação';
-    }, 2000);
+    document.getElementById('manifestUrl').textContent   = manifestUrl;
+    document.getElementById('btnDesktop').href           = stremioProtocol;
+    document.getElementById('btnWeb').href               = stremioWeb;
+    document.getElementById('resultSection').classList.add('show');
+
+    // Scroll to results
+    document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   function copyUrl() {
-    const url = document.getElementById('addonUrl').textContent;
+    const url = document.getElementById('manifestUrl').textContent;
     navigator.clipboard.writeText(url).then(() => {
       const t = document.getElementById('toast');
       t.classList.add('show');
@@ -397,10 +410,7 @@
     });
   }
 
-  // Allow Enter key to trigger install
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Enter') install();
-  });
+  document.addEventListener('keydown', e => { if (e.key === 'Enter') generate(); });
 </script>
 </body>
 </html>
