@@ -6,6 +6,13 @@ const YEAR_RE = /\b(19[5-9]\d|20[0-3]\d)\b/;
 const EP_RE   = /[Ss](\d{1,2})[Ee](\d{1,2})/;
 const S_RE    = /\b[Ss](\d{1,2})\b(?![Ee\d])/;
 
+// "1ª Temporada", "2a Temporada", "Season 3", "Temporada 2"
+const SEASON_WORD_RE = /\b(?:season|temporada)\s*(\d{1,2})\b/i;
+// "1ª Temporada" com ordinal pt
+const SEASON_ORD_RE  = /\b(\d{1,2})[aªº°]\s+temporada\b/i;
+// "Parte 2", "Part 2"  (mini-séries)
+const PART_RE        = /\b(?:parte?|part)\s*(\d)\b/i;
+
 // Grupos de release de anime conhecidos
 const ANIME_GROUPS = [
   'SubsPlease','Erai-raws','HorribleSubs','WF','ASW','Yameii','Judas',
@@ -16,9 +23,9 @@ const ANIME_GROUPS = [
 ];
 const ANIME_GROUP_RE = new RegExp(`^\\[(${ANIME_GROUPS.join('|')})[^\\]]*\\]`, 'i');
 
-// Padrão de episódio anime: "- 01" ou " 03 " sem SxxExx
-const ANIME_EP_RE   = /\s[-–]\s+(\d{1,3})\s*(?:\[|$)/;
-const ANIME_EP2_RE  = /^(.+?)\s+(\d{2,3})\s*[\[(]/;
+// Padrão de episódio anime: "- 01" ou título seguido de número + [
+const ANIME_EP_RE  = /\s[-–]\s+(\d{1,3})\s*(?:\[|$)/;
+const ANIME_EP2_RE = /^(.+?)\s+(\d{2,3})\s*[\[(]/;
 
 // Caracteres japoneses/CJK
 const CJK_RE = /[\u3040-\u30FF\u4E00-\u9FFF]/;
@@ -57,20 +64,36 @@ function guessMediaInfo(raw) {
 
   const norm = normalize(name);
 
-  // Detectar série via SxxExx
-  const epMatch = norm.match(EP_RE);
+  // ── Detectar série ─────────────────────────────────────────────────────────
   let isSeries = false, season = null, episode = null;
   let serieCut = norm.length;
 
+  // 1. SxxExx (padrão universal)
+  const epMatch = norm.match(EP_RE);
   if (epMatch) {
-    isSeries = true; season = parseInt(epMatch[1], 10); episode = parseInt(epMatch[2], 10);
+    isSeries = true;
+    season   = parseInt(epMatch[1], 10);
+    episode  = parseInt(epMatch[2], 10);
     serieCut = epMatch.index;
-  } else {
+  }
+
+  // 2. Só Sxx sem episódio
+  if (!isSeries) {
     const sm = norm.match(S_RE);
     if (sm) { isSeries = true; season = parseInt(sm[1], 10); serieCut = sm.index; }
   }
 
-  // Detectar episódio anime (- 01 ou title 01 [)
+  // 3. "Temporada X" / "Season X" / "Xª Temporada"
+  if (!isSeries) {
+    const tw = norm.match(SEASON_WORD_RE) || norm.match(SEASON_ORD_RE);
+    if (tw) {
+      isSeries = true;
+      season   = parseInt(tw[1], 10);
+      serieCut = tw.index;
+    }
+  }
+
+  // 4. Episódio anime: "- 01" ou "Title 01 ["
   let animeEp = null;
   if (!isSeries) {
     const ae = norm.match(ANIME_EP_RE);
@@ -83,7 +106,7 @@ function guessMediaInfo(raw) {
 
   const isAnime = isAnimeGroup || hasCJK || (isSeries && animeEp !== null);
 
-  // Corte técnico
+  // ── Corte técnico ──────────────────────────────────────────────────────────
   let techCut = norm.length;
   for (const re of TECH) {
     const m = norm.match(re);
@@ -100,6 +123,8 @@ function guessMediaInfo(raw) {
 
   title = title.replace(/\s*\([^)]*\)/g, '');
   title = title.replace(/\s*\[[^\]]*\]/g, '');
+  // Remove "- 1ª Temporada" ou "- Season 2" que ficaram no título
+  title = title.replace(/\s*[-–]\s*(?:\d+[aªº°]\s*)?(?:temporada|season).*$/i, '');
   title = title.replace(/[\s([{]+$/, '').trim();
   title = title.replace(/\s*[-–]\s*\d+\s*$/, '');
   title = title.replace(/[\s\-–]+$/, '').trim();
