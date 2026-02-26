@@ -44,12 +44,23 @@ async function matchItem(item, tmdbApiKey, type, lang) {
   const cacheKey  = `match:${type}:${lang}:${name}`;
 
   const cached = matchCache.get(cacheKey);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    // Revalidar entradas antigas do cache — anime nunca deve estar em 'series'
+    if (cached !== null) {
+      const info = guessMediaInfo(name);
+      if (info) {
+        if (type === 'movie'  && (info.isSeries || info.isAnime)) { matchCache.set(cacheKey, null); return null; }
+        if (type === 'series' && info.isAnime)                     { matchCache.set(cacheKey, null); return null; }
+        if (type === 'anime'  && !info.isAnime)                    { matchCache.set(cacheKey, null); return null; }
+      }
+    }
+    return cached;
+  }
 
   const info = guessMediaInfo(name);
   if (!info) { matchCache.set(cacheKey, null); return null; }
 
-  // Filtro estrito por tipo — anime NÃO entra em series e vice-versa
+  // Filtro estrito por tipo
   if (type === 'movie'  && (info.isSeries || info.isAnime))  { matchCache.set(cacheKey, null); return null; }
   if (type === 'series' && (!info.isSeries || info.isAnime)) { matchCache.set(cacheKey, null); return null; }
   if (type === 'anime'  && !info.isAnime)                    { matchCache.set(cacheKey, null); return null; }
@@ -98,7 +109,6 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
     const info = guessMediaInfo(name);
     if (!info) continue;
 
-    // Filtro estrito — anime só no catálogo anime, séries sem anime
     if (type === 'movie'  && (info.isSeries || info.isAnime))  continue;
     if (type === 'series' && (!info.isSeries || info.isAnime)) continue;
     if (type === 'anime'  && !info.isAnime)                    continue;
@@ -208,10 +218,11 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
         try {
           const url = await getTorBoxStreamLink(torboxApiKey, item.source, item.id, file.id);
           if (!url) continue;
+          const fname = file.name || file.short_name || item.name || '';
           streams.push({
             url,
-            name:          formatStreamName(file.name || item.name),
-            description:   formatStreamDesc(file.name || item.name, file.size, item.source),
+            name:          formatStreamName(fname),
+            description:   formatStreamDesc(fname, file.size, item.source),
             behaviorHints: { notWebReady: false },
           });
         } catch {}
@@ -219,12 +230,15 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
     } else {
       try {
         const url = await getTorBoxStreamLink(torboxApiKey, item.source, item.id, 0);
-        if (url) streams.push({
-          url,
-          name:          formatStreamName(item.name),
-          description:   formatStreamDesc(item.name, item.size, item.source),
-          behaviorHints: { notWebReady: false },
-        });
+        if (url) {
+          const fname = item.name || '';
+          streams.push({
+            url,
+            name:          formatStreamName(fname),
+            description:   formatStreamDesc(fname, item.size, item.source),
+            behaviorHints: { notWebReady: false },
+          });
+        }
       } catch {}
     }
   }
@@ -233,31 +247,42 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
 }
 
 // ─── FORMATAÇÃO DOS STREAMS ───────────────────────────────────────────────────
-// name = linha 1 (badge no Stremio), description = linha 2+ (detalhes)
 function formatStreamName(filename = '') {
-  const q    = extractQuality(filename);
-  const c    = extractCodec(filename);
-  const hdr  = extractHDR(filename);
-  const src  = extractSource(filename);
+  const q   = extractQuality(filename);
+  const c   = extractCodec(filename);
+  const hdr = extractHDR(filename);
+  const src = extractSource(filename);
 
-  // Ex: "⚡ TorBox  •  4K HDR  •  H.265  •  WEB-DL"
-  const parts = ['⚡ TorBox'];
-  const badge = [q, hdr, c, src].filter(Boolean).join(' • ');
-  if (badge) parts.push(badge);
-  return parts.join('  •  ');
+  const badges = [q, hdr, c, src].filter(Boolean).join(' · ');
+  return badges ? `⚡ TorBox · ${badges}` : '⚡ TorBox';
 }
 
 function formatStreamDesc(filename = '', size, source) {
-  const lang  = extractAudio(filename);
-  const subs  = extractSubs(filename);
-  const sz    = size ? formatBytes(size) : '';
+  const lang = extractAudio(filename);
+  const subs = extractSubs(filename);
+  const sz   = size ? formatBytes(size) : '';
+
+  // Truncar nome do arquivo para exibição
+  const displayName = truncateFilename(filename, 60);
 
   const lines = [];
-  if (lang)  lines.push(`🎙 ${lang}`);
-  if (subs)  lines.push(`💬 ${subs}`);
-  if (sz)    lines.push(`💾 ${sz}`);
-  if (source) lines.push(`☁️ ${source}`);
-  return lines.join('   ');
+  if (displayName) lines.push(`📄 ${displayName}`);
+  const details = [
+    lang  ? `🎙 ${lang}`  : '',
+    subs  ? `💬 ${subs}`  : '',
+    sz    ? `💾 ${sz}`    : '',
+    source ? `☁️ ${source}` : '',
+  ].filter(Boolean).join('   ');
+  if (details) lines.push(details);
+
+  return lines.join('\n');
+}
+
+function truncateFilename(name = '', maxLen = 60) {
+  // Remove extensão e encurta se necessário
+  const clean = name.replace(/\.(mkv|mp4|avi|mov|ts|wmv|m4v|webm)$/i, '');
+  if (clean.length <= maxLen) return clean;
+  return clean.substring(0, maxLen - 1) + '…';
 }
 
 function extractQuality(n = '') {
@@ -299,29 +324,27 @@ function extractAudio(n = '') {
   const u = n.toUpperCase();
   const parts = [];
 
-  // Idioma
-  if (u.match(/\bDUAL\b|\bDUBLADO\b/))          parts.push('Dublado + Legendado');
-  else if (u.match(/\bNACIONAL\b|\bPT.?BR\b/))   parts.push('Português BR');
-  else if (u.match(/\bPT.?PT\b/))                 parts.push('Português PT');
-  else if (u.match(/\bLEGENDADO\b|\bSUB\b/))      parts.push('Legendado');
-  else if (u.match(/\bENG\b|\bENGLISH\b/))        parts.push('Inglês');
+  if (u.match(/\bDUAL\b|\bDUBLADO\b/))        parts.push('Dublado');
+  else if (u.match(/\bNACIONAL\b|\bPT.?BR\b/)) parts.push('PT-BR');
+  else if (u.match(/\bPT.?PT\b/))              parts.push('PT-PT');
+  else if (u.match(/\bLEGENDADO\b/))           parts.push('Leg.');
+  else if (u.match(/\bENG(LISH)?\b/))          parts.push('EN');
 
-  // Codec de áudio
-  if (u.match(/\bATMOS\b/))                       parts.push('Atmos');
-  else if (u.match(/\bTRUEHD\b/))                 parts.push('TrueHD');
-  else if (u.match(/\bDTS.?HD\b/))                parts.push('DTS-HD');
-  else if (u.match(/\bDTS\b/))                    parts.push('DTS');
+  if (u.match(/\bATMOS\b/))                    parts.push('Atmos');
+  else if (u.match(/\bTRUEHD\b/))              parts.push('TrueHD');
+  else if (u.match(/\bDTS.?HD\b/))             parts.push('DTS-HD');
+  else if (u.match(/\bDTS\b/))                 parts.push('DTS');
   else if (u.match(/\bDDP?5\.?1\b|\bDD5\.?1\b/)) parts.push('DD5.1');
-  else if (u.match(/\bAAC\b/))                     parts.push('AAC');
+  else if (u.match(/\bAAC\b/))                 parts.push('AAC');
 
-  return parts.join(' • ');
+  return parts.join(' · ');
 }
 
 function extractSubs(n = '') {
   const u = n.toUpperCase();
-  if (u.match(/\bMULTI.?SUB\b/))                  return 'Multi-legendas';
-  if (u.match(/\bPLSUB\b/))                        return 'Leg. PT';
-  if (u.match(/\bLEGENDADO\b/) && !u.match(/DUAL/)) return 'PT-BR';
+  if (u.match(/\bMULTI.?SUB\b/))                        return 'Multi';
+  if (u.match(/\bPLSUB\b/))                             return 'PT';
+  if (u.match(/\bLEGENDADO\b/) && !u.match(/\bDUAL\b/)) return 'PT-BR';
   return '';
 }
 
