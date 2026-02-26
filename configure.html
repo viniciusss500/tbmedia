@@ -135,6 +135,31 @@
     }
     .toast.show { opacity: 1; transform: translateY(0); }
     .footer { text-align: center; margin-top: 1.5rem; font-size: .76rem; color: var(--muted); }
+
+    .referral-box {
+      background: rgba(124,58,237,.08); border: 1px solid rgba(124,58,237,.3);
+      border-radius: .75rem; padding: 1rem 1.1rem; margin-top: .5rem;
+    }
+    .referral-title { font-weight: 700; font-size: .9rem; margin-bottom: .3rem; color: #a78bfa; }
+    .referral-desc  { font-size: .78rem; color: var(--muted); margin-bottom: .6rem; }
+    .referral-link  {
+      display: inline-block; font-size: .82rem; color: #818cf8;
+      text-decoration: none; font-weight: 600; margin-bottom: .6rem;
+    }
+    .referral-link:hover { text-decoration: underline; }
+    .referral-code-row  { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+    .referral-label { font-size: .75rem; color: var(--muted); flex-shrink: 0; }
+    .referral-code  {
+      font-family: 'Menlo','Consolas',monospace; font-size: .72rem;
+      color: #a78bfa; background: rgba(0,0,0,.3); padding: .2rem .5rem;
+      border-radius: .3rem; flex: 1; min-width: 0; word-break: break-all;
+    }
+    .btn-copy-ref {
+      background: none; border: 1px solid var(--border); border-radius: .35rem;
+      color: var(--muted); cursor: pointer; padding: .25rem .5rem; font-size: .75rem;
+      transition: all .2s; white-space: nowrap; flex-shrink: 0;
+    }
+    .btn-copy-ref:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
@@ -222,6 +247,20 @@
     </p>
   </div>
 
+  <div class="divider"></div>
+  <div class="referral-box">
+    <div class="referral-title">💜 Ainda não tem TorBox?</div>
+    <p class="referral-desc">Assine com o link de referência abaixo e ajude o projeto:</p>
+    <a class="referral-link" href="https://torbox.app/subscription?referral=b08bcd10-8df2-44c9-a0ba-4d5bdb62ef96" target="_blank" rel="noopener">
+      torbox.app/subscription →
+    </a>
+    <div class="referral-code-row">
+      <span class="referral-label">Código:</span>
+      <span class="referral-code" id="refCode">b08bcd10-8df2-44c9-a0ba-4d5bdb62ef96</span>
+      <button class="btn-copy-ref" onclick="copyRef()">Copiar</button>
+    </div>
+  </div>
+
   <div class="footer">TorBox Catalog • Stremio + TorBox + TMDB</div>
 </div>
 
@@ -287,6 +326,16 @@
   }
 
   document.addEventListener('keydown', e => { if (e.key === 'Enter') generate(); });
+
+  function copyRef() {
+    const code = document.getElementById('refCode').textContent;
+    navigator.clipboard.writeText(code).then(() => {
+      const t = document.getElementById('toast');
+      t.textContent = '✓ Código copiado!';
+      t.classList.add('show');
+      setTimeout(() => { t.classList.remove('show'); t.textContent = '✓ URL copiada!'; }, 2200);
+    });
+  }
 </script>
 </body>
 </html>
