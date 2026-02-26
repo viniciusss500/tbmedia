@@ -1,46 +1,60 @@
 const axios = require('axios');
-const TMDB_BASE = 'https://api.themoviedb.org/3';
+
+const TMDB_BASE  = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE = 'https://image.tmdb.org/t/p';
-const LANG = 'pt-BR';
-const REGION = 'BR';
-/**
- * TMDB aceita dois tipos de chave:
- *   - API Key v3 (32 chars hex): passa como ?api_key=XXX
- *   - Read Access Token v4 (JWT começando com "eyJ"): passa como Bearer
- *
- * Detectamos automaticamente e usamos o método correto para evitar 401.
- */
+
 function tmdbAuth(apiKey) {
   if (!apiKey) return { headers: {}, params: {} };
   if (apiKey.startsWith('eyJ')) {
-    // Token v4 (JWT)
     return { headers: { Authorization: `Bearer ${apiKey}` }, params: {} };
   }
-  // API Key v3 (hex)
   return { headers: {}, params: { api_key: apiKey } };
 }
+
 /**
- * Search for a movie or TV show by name. Returns the best match.
+ * Converte IMDB ID (tt1234567) → { tmdbId, type }
+ * Usado quando outros catálogos passam IDs do IMDB para o handler de stream.
  */
-async function searchMetadata(apiKey, query, type, year) {
+async function imdbToTmdb(apiKey, imdbId) {
+  const auth = tmdbAuth(apiKey);
+  try {
+    const res = await axios.get(`${TMDB_BASE}/find/${imdbId}`, {
+      headers: auth.headers,
+      params: { ...auth.params, external_source: 'imdb_id' },
+    });
+    const data = res.data;
+    if (data.movie_results?.length > 0) {
+      return { tmdbId: data.movie_results[0].id, type: 'movie' };
+    }
+    if (data.tv_results?.length > 0) {
+      return { tmdbId: data.tv_results[0].id, type: 'series' };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function searchMetadata(apiKey, query, type, year, lang = 'pt-BR') {
   const endpoint = type === 'movie' ? '/search/movie' : '/search/tv';
   const auth = tmdbAuth(apiKey);
-  const params = { ...auth.params, query, language: LANG, region: REGION, page: 1 };
+  const region = lang.split('-')[1] || 'BR';
+  const params = { ...auth.params, query, language: lang, region, page: 1 };
   if (year) params.year = year;
+
   const res = await axios.get(`${TMDB_BASE}${endpoint}`, {
     headers: auth.headers,
     params,
   });
-  const results = res.data?.results || [];
-  return results[0] || null;
+
+  return res.data?.results?.[0] || null;
 }
-/**
- * Get full metadata for a movie or TV show by TMDB id.
- */
-async function getMetadata(apiKey, tmdbId, type) {
+
+async function getMetadata(apiKey, tmdbId, type, lang = 'pt-BR') {
   const endpoint = type === 'movie' ? `/movie/${tmdbId}` : `/tv/${tmdbId}`;
   const auth = tmdbAuth(apiKey);
-  const baseParams = { ...auth.params, language: LANG };
+  const baseParams = { ...auth.params, language: lang };
+
   const [detailRes, creditsRes, externalRes] = await Promise.allSettled([
     axios.get(`${TMDB_BASE}${endpoint}`, {
       headers: auth.headers,
@@ -55,28 +69,32 @@ async function getMetadata(apiKey, tmdbId, type) {
       params: auth.params,
     }),
   ]);
+
   const detail   = detailRes.status   === 'fulfilled' ? detailRes.value.data   : null;
   const credits  = creditsRes.status  === 'fulfilled' ? creditsRes.value.data  : null;
   const external = externalRes.status === 'fulfilled' ? externalRes.value.data : null;
+
   if (!detail) return null;
+
   const imdbId    = external?.imdb_id || null;
   const cast      = (credits?.cast || []).slice(0, 8).map(c => c.name);
   const directors = type === 'movie'
     ? (credits?.crew || []).filter(c => c.job === 'Director').map(c => c.name)
     : (detail.created_by || []).map(c => c.name);
-  let poster     = detail.poster_path   ? `${TMDB_IMAGE}/w500${detail.poster_path}`
-: null;
-  let background = detail.backdrop_path ? `${TMDB_IMAGE}/w1280${detail.backdrop_path}`
-: null;
-  // Preferir pôster em PT-BR se disponível
-  const ptPoster = detail.images?.posters?.find(p => p.iso_639_1 === 'pt');
-  if (ptPoster) poster = `${TMDB_IMAGE}/w500${ptPoster.file_path}`;
-  const genres = (detail.genres || []).map(g => g.name);
-  // Trailer PT-BR ou EN
-  const videos = detail.videos?.results || [];
+
+  let poster     = detail.poster_path   ? `${TMDB_IMAGE}/w500${detail.poster_path}`    : null;
+  let background = detail.backdrop_path ? `${TMDB_IMAGE}/w1280${detail.backdrop_path}` : null;
+
+  const langCode    = lang.split('-')[0];
+  const localPoster = detail.images?.posters?.find(p => p.iso_639_1 === langCode);
+  if (localPoster) poster = `${TMDB_IMAGE}/w500${localPoster.file_path}`;
+
+  const genres  = (detail.genres || []).map(g => g.name);
+  const videos  = detail.videos?.results || [];
   const trailer =
-    videos.find(v => v.type === 'Trailer' && v.site === 'YouTube' && v.iso_639_1 === 'pt') ||
+    videos.find(v => v.type === 'Trailer' && v.site === 'YouTube' && v.iso_639_1 === langCode) ||
     videos.find(v => v.type === 'Trailer' && v.site === 'YouTube');
+
   if (type === 'movie') {
     return {
       id: `torbox:movie:${tmdbId}`,
@@ -108,6 +126,7 @@ async function getMetadata(apiKey, tmdbId, type) {
         released: s.air_date ? new Date(s.air_date).toISOString() : undefined,
         releaseInfo: s.air_date?.split('-')[0],
       }));
+
     return {
       id: `torbox:series:${tmdbId}`,
       tmdbId, imdbId,
@@ -127,15 +146,14 @@ async function getMetadata(apiKey, tmdbId, type) {
     };
   }
 }
-/**
- * Get episodes for a specific season.
- */
-async function getSeasonEpisodes(apiKey, tmdbId, seasonNumber) {
+
+async function getSeasonEpisodes(apiKey, tmdbId, seasonNumber, lang = 'pt-BR') {
   const auth = tmdbAuth(apiKey);
   const res = await axios.get(`${TMDB_BASE}/tv/${tmdbId}/season/${seasonNumber}`, {
     headers: auth.headers,
-    params: { ...auth.params, language: LANG },
+    params: { ...auth.params, language: lang },
   });
+
   return (res.data?.episodes || []).map(ep => ({
     id: `torbox:series:${tmdbId}:${seasonNumber}:${ep.episode_number}`,
     title: ep.name || `Episódio ${ep.episode_number}`,
@@ -147,4 +165,5 @@ async function getSeasonEpisodes(apiKey, tmdbId, seasonNumber) {
     rating: ep.vote_average?.toFixed(1),
   }));
 }
-module.exports = { searchMetadata, getMetadata, getSeasonEpisodes };
+
+module.exports = { searchMetadata, getMetadata, getSeasonEpisodes, imdbToTmdb };
