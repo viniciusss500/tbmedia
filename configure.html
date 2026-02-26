@@ -157,12 +157,27 @@
   </div>
 
   <div class="field">
-    <label>TMDB API Key (v3) <span class="req">*</span></label>
+    <label>TMDB API Key <span class="req">*</span></label>
     <div class="input-wrap">
       <input type="password" id="tmdbApiKey" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" />
       <button class="toggle-btn" type="button" onclick="toggleVis('tmdbApiKey',this)">👁</button>
     </div>
-    <p class="field-hint">Obtenha em <a href="https://www.themoviedb.org/settings/api" target="_blank">themoviedb.org/settings/api</a></p>
+    <p class="field-hint">Obtenha em <a href="https://www.themoviedb.org/settings/api" target="_blank">themoviedb.org/settings/api</a> → copie a <strong style="color:var(--text)">API Key (v3)</strong> <em>ou</em> o <strong style="color:var(--text)">Read Access Token (v4)</strong> — ambos funcionam</p>
+  </div>
+
+  <div class="field">
+    <label>Idioma dos metadados</label>
+    <select id="lang">
+      <option value="pt-BR">🇧🇷 Português (Brasil)</option>
+      <option value="pt-PT">🇵🇹 Português (Portugal)</option>
+      <option value="en-US">🇺🇸 English</option>
+      <option value="es-ES">🇪🇸 Español</option>
+      <option value="fr-FR">🇫🇷 Français</option>
+      <option value="de-DE">🇩🇪 Deutsch</option>
+      <option value="it-IT">🇮🇹 Italiano</option>
+      <option value="ja-JP">🇯🇵 日本語</option>
+    </select>
+    <p class="field-hint">Títulos, descrições e pôsteres serão buscados neste idioma</p>
   </div>
 
   <div class="field">
@@ -229,6 +244,7 @@
     const torboxApiKey = document.getElementById('torboxApiKey').value.trim();
     const tmdbApiKey   = document.getElementById('tmdbApiKey').value.trim();
     const sortBy       = document.getElementById('sortBy').value;
+    const lang         = document.getElementById('lang').value;
 
     let valid = true;
     [['torboxApiKey', torboxApiKey], ['tmdbApiKey', tmdbApiKey]].forEach(([id, val]) => {
@@ -238,7 +254,7 @@
     });
     if (!valid) return;
 
-    const encoded     = encodeConfig({ torboxApiKey, tmdbApiKey, sortBy });
+    const encoded     = encodeConfig({ torboxApiKey, tmdbApiKey, sortBy, lang });
     const origin      = window.location.origin;
     const manifestUrl = `${origin}/${encoded}/manifest.json`;
 
