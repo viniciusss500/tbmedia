@@ -101,46 +101,49 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
   const search    = extra?.search?.toLowerCase();
   const PAGE_SIZE = 50;
 
-  const relevant    = [];
-  const dedupTitles = new Map();
-
+  // Filtrar por tipo (sem deduplicar ainda — precisamos de TODOS os episódios no índice)
+  const allRelevant = [];
   for (const item of downloads) {
     const name = item.name || item.filename || '';
     const info = guessMediaInfo(name);
     if (!info) continue;
-
     if (type === 'movie'  && (info.isSeries || info.isAnime))  continue;
     if (type === 'series' && (!info.isSeries || info.isAnime)) continue;
     if (type === 'anime'  && !info.isAnime)                    continue;
-
-    const dedupeKey = `${info.title}::${info.year}`;
-    if (!dedupTitles.has(dedupeKey)) {
-      dedupTitles.set(dedupeKey, true);
-      relevant.push({ item, info });
-    }
+    allRelevant.push({ item, info });
   }
 
-  console.log(`[Catalog] type=${type} | raw=${downloads.length} → after filter+dedup=${relevant.length}`);
+  console.log(`[Catalog] type=${type} | raw=${downloads.length} → filtered=${allRelevant.length}`);
 
+  // TMDB lookup para TODOS os itens (episódios individuais) — popula o índice completo
   const CONCURRENCY = 15;
   const results     = [];
-  for (let i = 0; i < relevant.length; i += CONCURRENCY) {
-    const batch   = relevant.slice(i, i + CONCURRENCY);
+  for (let i = 0; i < allRelevant.length; i += CONCURRENCY) {
+    const batch   = allRelevant.slice(i, i + CONCURRENCY);
     const matched = await Promise.all(batch.map(({ item }) => matchItem(item, tmdbApiKey, type, lang)));
     results.push(...matched.filter(Boolean));
   }
 
+  // Popula tmdbIndex com TODOS os episódios/arquivos (sem dedup)
+  // e dedup por tmdbId só para exibição no catálogo
   const seen = new Map();
   for (const meta of results) {
     const indexKey = `${meta.type}:${meta.tmdbId}`;
     const entry    = { item: meta.torboxItem, season: meta.season, episode: meta.episode };
 
-    if (!seen.has(meta.id)) {
-      seen.set(meta.id, { ...meta, torboxItems: [entry] });
+    // Índice: acumula todos os episódios/arquivos para streams
+    if (!tmdbIndex.has(indexKey)) {
       tmdbIndex.set(indexKey, [entry]);
     } else {
-      seen.get(meta.id).torboxItems.push(entry);
-      tmdbIndex.get(indexKey)?.push(entry);
+      // Evitar duplicatas no índice pelo mesmo item
+      const existing = tmdbIndex.get(indexKey);
+      const isDup = existing.some(e => e.item.id === entry.item.id);
+      if (!isDup) existing.push(entry);
+    }
+
+    // Catálogo: apenas um card por show
+    if (!seen.has(meta.id)) {
+      seen.set(meta.id, { ...meta, torboxItems: [entry] });
     }
   }
 
