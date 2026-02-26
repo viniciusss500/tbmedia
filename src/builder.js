@@ -14,15 +14,10 @@ function loadPersistentCache() {
     if (fs.existsSync(CACHE_FILE)) {
       const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
       let count = 0;
-      for (const [k, v] of Object.entries(data)) {
-        matchCache.set(k, v);
-        count++;
-      }
+      for (const [k, v] of Object.entries(data)) { matchCache.set(k, v); count++; }
       console.log(`[Cache] Loaded ${count} TMDB entries from disk`);
     }
-  } catch (e) {
-    console.error('[Cache] Load error:', e.message);
-  }
+  } catch (e) { console.error('[Cache] Load error:', e.message); }
 }
 
 function savePersistentCache() {
@@ -33,9 +28,7 @@ function savePersistentCache() {
       if (v !== undefined) data[k] = v;
     }
     fs.writeFileSync(CACHE_FILE, JSON.stringify(data));
-  } catch (e) {
-    console.error('[Cache] Save error:', e.message);
-  }
+  } catch (e) { console.error('[Cache] Save error:', e.message); }
 }
 
 loadPersistentCache();
@@ -45,8 +38,6 @@ setInterval(savePersistentCache, 60_000);
 const tmdbIndex = new Map();
 
 // ─── MATCH ITEM ───────────────────────────────────────────────────────────────
-// type aqui é 'movie' | 'series' | 'anime'
-// Para TMDB, anime é sempre 'series'
 async function matchItem(item, tmdbApiKey, type, lang) {
   const name      = item.name || item.filename || '';
   const tmdbType  = type === 'movie' ? 'movie' : 'series';
@@ -56,22 +47,16 @@ async function matchItem(item, tmdbApiKey, type, lang) {
   if (cached !== undefined) return cached;
 
   const info = guessMediaInfo(name);
-  if (!info) {
-    matchCache.set(cacheKey, null);
-    return null;
-  }
+  if (!info) { matchCache.set(cacheKey, null); return null; }
 
-  // Filtro por tipo
-  if (type === 'movie'  && (info.isSeries || info.isAnime)) { matchCache.set(cacheKey, null); return null; }
+  // Filtro estrito por tipo — anime NÃO entra em series e vice-versa
+  if (type === 'movie'  && (info.isSeries || info.isAnime))  { matchCache.set(cacheKey, null); return null; }
   if (type === 'series' && (!info.isSeries || info.isAnime)) { matchCache.set(cacheKey, null); return null; }
-  if (type === 'anime'  && !info.isAnime)                   { matchCache.set(cacheKey, null); return null; }
+  if (type === 'anime'  && !info.isAnime)                    { matchCache.set(cacheKey, null); return null; }
 
   try {
     const result = await searchMetadata(tmdbApiKey, info.title, tmdbType, info.year, lang);
-    if (!result) {
-      matchCache.set(cacheKey, null);
-      return null;
-    }
+    if (!result) { matchCache.set(cacheKey, null); return null; }
 
     console.log(`[TMDB] "${info.title}" → "${result.title || result.name}" (${result.id})`);
 
@@ -84,7 +69,7 @@ async function matchItem(item, tmdbApiKey, type, lang) {
       releaseInfo: (result.release_date || result.first_air_date || '').split('-')[0],
       released:    result.release_date || result.first_air_date,
       tmdbId:      result.id,
-      catalogType: type, // 'movie' | 'series' | 'anime'
+      catalogType: type,
       torboxItem:  item,
       season:      info.season,
       episode:     info.episode,
@@ -105,7 +90,6 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
   const search    = extra?.search?.toLowerCase();
   const PAGE_SIZE = 50;
 
-  // STEP 1: Filtrar e deduplicar
   const relevant    = [];
   const dedupTitles = new Map();
 
@@ -114,6 +98,7 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
     const info = guessMediaInfo(name);
     if (!info) continue;
 
+    // Filtro estrito — anime só no catálogo anime, séries sem anime
     if (type === 'movie'  && (info.isSeries || info.isAnime))  continue;
     if (type === 'series' && (!info.isSeries || info.isAnime)) continue;
     if (type === 'anime'  && !info.isAnime)                    continue;
@@ -127,17 +112,14 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
 
   console.log(`[Catalog] type=${type} | raw=${downloads.length} → after filter+dedup=${relevant.length}`);
 
-  // STEP 2: TMDB lookup
   const CONCURRENCY = 15;
   const results     = [];
-
   for (let i = 0; i < relevant.length; i += CONCURRENCY) {
     const batch   = relevant.slice(i, i + CONCURRENCY);
     const matched = await Promise.all(batch.map(({ item }) => matchItem(item, tmdbApiKey, type, lang)));
     results.push(...matched.filter(Boolean));
   }
 
-  // STEP 3: Deduplicar por TMDB id + popular índice
   const seen = new Map();
   for (const meta of results) {
     const indexKey = `${meta.type}:${meta.tmdbId}`;
@@ -154,12 +136,8 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
 
   let metas = Array.from(seen.values());
 
-  // STEP 4: Busca
-  if (search) {
-    metas = metas.filter(m => m.name?.toLowerCase().includes(search));
-  }
+  if (search) metas = metas.filter(m => m.name?.toLowerCase().includes(search));
 
-  // STEP 5: Ordenação
   if (sortBy === 'data_lancamento') {
     metas.sort((a, b) => (b.released || '').localeCompare(a.released || ''));
   } else if (sortBy === 'titulo') {
@@ -182,7 +160,6 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
 
 // ─── META ─────────────────────────────────────────────────────────────────────
 async function buildMeta(tmdbId, type, tmdbApiKey, lang = 'pt-BR') {
-  // anime usa type 'series' no TMDB
   const tmdbType = type === 'anime' ? 'series' : type;
   return await getMetadata(tmdbApiKey, tmdbId, tmdbType, lang);
 }
@@ -193,15 +170,13 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
   let entries    = tmdbIndex.get(indexKey);
 
   if (!entries) {
-    console.log(`[Stream] Índice vazio para ${indexKey}, reconstruindo do matchCache...`);
+    console.log(`[Stream] Índice vazio para ${indexKey}, reconstruindo...`);
     entries = [];
     const downloads = await getTorBoxDownloads(torboxApiKey);
     for (const item of downloads) {
-      const name     = item.name || item.filename || '';
-      // Tenta os três tipos de cache
+      const name = item.name || item.filename || '';
       for (const t of ['movie', 'series', 'anime']) {
-        const cacheKey = `match:${t}:${lang || 'pt-BR'}:${name}`;
-        const cached   = matchCache.get(cacheKey);
+        const cached = matchCache.get(`match:${t}:${lang || 'pt-BR'}:${name}`);
         if (cached && String(cached.tmdbId) === String(tmdbId)) {
           entries.push({ item, season: cached.season, episode: cached.episode });
           break;
@@ -235,8 +210,8 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
           if (!url) continue;
           streams.push({
             url,
-            name:          `TorBox\n${extractQuality(file.name || item.name)}`,
-            description:   `📁 ${file.name || item.name}\n💾 ${formatBytes(file.size)}\n⚡ ${item.source}`,
+            name:          formatStreamName(file.name || item.name),
+            description:   formatStreamDesc(file.name || item.name, file.size, item.source),
             behaviorHints: { notWebReady: false },
           });
         } catch {}
@@ -246,8 +221,8 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
         const url = await getTorBoxStreamLink(torboxApiKey, item.source, item.id, 0);
         if (url) streams.push({
           url,
-          name:          `TorBox\n${extractQuality(item.name)}`,
-          description:   `📁 ${item.name}\n⚡ ${item.source}`,
+          name:          formatStreamName(item.name),
+          description:   formatStreamDesc(item.name, item.size, item.source),
           behaviorHints: { notWebReady: false },
         });
       } catch {}
@@ -257,16 +232,97 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
   return streams;
 }
 
-function extractQuality(name = '') {
-  const n = name.toUpperCase();
-  if (n.includes('2160P') || n.includes('4K') || n.includes('UHD')) return '4K';
-  if (n.includes('1080P')) return '1080p';
-  if (n.includes('720P'))  return '720p';
-  if (n.includes('480P'))  return '480p';
-  if (n.includes('BLURAY') || n.includes('BLU-RAY')) return 'BluRay';
-  if (n.includes('WEBRIP') || n.includes('WEB-RIP')) return 'WEBRip';
-  if (n.includes('WEBDL')  || n.includes('WEB-DL'))  return 'WEB-DL';
-  return 'SD';
+// ─── FORMATAÇÃO DOS STREAMS ───────────────────────────────────────────────────
+// name = linha 1 (badge no Stremio), description = linha 2+ (detalhes)
+function formatStreamName(filename = '') {
+  const q    = extractQuality(filename);
+  const c    = extractCodec(filename);
+  const hdr  = extractHDR(filename);
+  const src  = extractSource(filename);
+
+  // Ex: "⚡ TorBox  •  4K HDR  •  H.265  •  WEB-DL"
+  const parts = ['⚡ TorBox'];
+  const badge = [q, hdr, c, src].filter(Boolean).join(' • ');
+  if (badge) parts.push(badge);
+  return parts.join('  •  ');
+}
+
+function formatStreamDesc(filename = '', size, source) {
+  const lang  = extractAudio(filename);
+  const subs  = extractSubs(filename);
+  const sz    = size ? formatBytes(size) : '';
+
+  const lines = [];
+  if (lang)  lines.push(`🎙 ${lang}`);
+  if (subs)  lines.push(`💬 ${subs}`);
+  if (sz)    lines.push(`💾 ${sz}`);
+  if (source) lines.push(`☁️ ${source}`);
+  return lines.join('   ');
+}
+
+function extractQuality(n = '') {
+  const u = n.toUpperCase();
+  if (u.match(/\b(2160P|4K|UHD)\b/)) return '4K';
+  if (u.match(/\b1080P\b/))           return '1080p';
+  if (u.match(/\b720P\b/))            return '720p';
+  if (u.match(/\b480P\b/))            return '480p';
+  return '';
+}
+
+function extractCodec(n = '') {
+  const u = n.toUpperCase();
+  if (u.match(/\bH\.?265\b|\bHEVC\b|\bX265\b/)) return 'H.265';
+  if (u.match(/\bH\.?264\b|\bAVC\b|\bX264\b/))  return 'H.264';
+  if (u.match(/\bAV1\b/))                         return 'AV1';
+  return '';
+}
+
+function extractHDR(n = '') {
+  const u = n.toUpperCase();
+  if (u.match(/DOLBY.?VISION|DV\b/)) return 'Dolby Vision';
+  if (u.match(/HDR10\+/))             return 'HDR10+';
+  if (u.match(/\bHDR\b/))            return 'HDR';
+  return '';
+}
+
+function extractSource(n = '') {
+  const u = n.toUpperCase();
+  if (u.match(/\bBLURAY\b|\bBLU.RAY\b|\bBDRIP\b/)) return 'BluRay';
+  if (u.match(/\bWEB.DL\b|\bWEBDL\b/))              return 'WEB-DL';
+  if (u.match(/\bWEBRIP\b|\bWEB.RIP\b/))            return 'WEBRip';
+  if (u.match(/\bHDTV\b/))                           return 'HDTV';
+  if (u.match(/\bDVDRIP\b/))                         return 'DVDRip';
+  return '';
+}
+
+function extractAudio(n = '') {
+  const u = n.toUpperCase();
+  const parts = [];
+
+  // Idioma
+  if (u.match(/\bDUAL\b|\bDUBLADO\b/))          parts.push('Dublado + Legendado');
+  else if (u.match(/\bNACIONAL\b|\bPT.?BR\b/))   parts.push('Português BR');
+  else if (u.match(/\bPT.?PT\b/))                 parts.push('Português PT');
+  else if (u.match(/\bLEGENDADO\b|\bSUB\b/))      parts.push('Legendado');
+  else if (u.match(/\bENG\b|\bENGLISH\b/))        parts.push('Inglês');
+
+  // Codec de áudio
+  if (u.match(/\bATMOS\b/))                       parts.push('Atmos');
+  else if (u.match(/\bTRUEHD\b/))                 parts.push('TrueHD');
+  else if (u.match(/\bDTS.?HD\b/))                parts.push('DTS-HD');
+  else if (u.match(/\bDTS\b/))                    parts.push('DTS');
+  else if (u.match(/\bDDP?5\.?1\b|\bDD5\.?1\b/)) parts.push('DD5.1');
+  else if (u.match(/\bAAC\b/))                     parts.push('AAC');
+
+  return parts.join(' • ');
+}
+
+function extractSubs(n = '') {
+  const u = n.toUpperCase();
+  if (u.match(/\bMULTI.?SUB\b/))                  return 'Multi-legendas';
+  if (u.match(/\bPLSUB\b/))                        return 'Leg. PT';
+  if (u.match(/\bLEGENDADO\b/) && !u.match(/DUAL/)) return 'PT-BR';
+  return '';
 }
 
 function formatBytes(bytes) {
