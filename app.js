@@ -75,7 +75,7 @@ function getBaseManifest(baseUrl) {
   return {
     id: 'community.torbox.catalog',
     version: '1.3.0',
-    name: 'TorBox Catalog',
+    name: 'TBmedia',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
     logo: 'https://torbox.app/favicon.ico',
     resources: ['catalog', 'meta', 'stream'],
