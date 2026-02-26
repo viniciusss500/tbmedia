@@ -1,9 +1,28 @@
 /**
  * Parser de nomes de torrent/usenet.
  */
+
 const YEAR_RE = /\b(19[5-9]\d|20[0-3]\d)\b/;
 const EP_RE   = /[Ss](\d{1,2})[Ee](\d{1,2})/;
 const S_RE    = /\b[Ss](\d{1,2})\b(?![Ee\d])/;
+
+// Grupos de release de anime conhecidos
+const ANIME_GROUPS = [
+  'SubsPlease','Erai-raws','HorribleSubs','WF','ASW','Yameii','Judas',
+  'LostYears','Tsundere-Raws','Nii-sama','Okay-Subs','GS','Asenshi',
+  'Commie','FFF','Doki','Kira','GJM','CBM','VCB-Studio','ANE',
+  'OZC','Underwater','UTW','NanoSubs','Chihiro','Coalgirls','THORA',
+  'BlurayDesuYo','KH','Ohys-Raws','RAW-NIBL','Moozzi2','IrizaRaws',
+];
+const ANIME_GROUP_RE = new RegExp(`^\\[(${ANIME_GROUPS.join('|')})[^\\]]*\\]`, 'i');
+
+// Padrão de episódio anime: "- 01" ou " 03 " sem SxxExx
+const ANIME_EP_RE   = /\s[-–]\s+(\d{1,3})\s*(?:\[|$)/;
+const ANIME_EP2_RE  = /^(.+?)\s+(\d{2,3})\s*[\[(]/;
+
+// Caracteres japoneses/CJK
+const CJK_RE = /[\u3040-\u30FF\u4E00-\u9FFF]/;
+
 const TECH = [
   /\b(2160p|1080p|720p|480p|360p)\b/i,
   /\b(4k|uhd)\b/i,
@@ -15,58 +34,84 @@ const TECH = [
   /\b(dual|dublado|legendado|nacional|plsub|multi[-\s]?sub|multi[-\s]?audio)\b/i,
   /\b(amzn|nflx|hmax|dsnp|iqiyi|adn)\b/i,
 ];
+
 function normalize(s) {
   return s.replace(/[._]/g, ' ').replace(/\s{2,}/g, ' ').trim();
 }
+
 function guessMediaInfo(raw) {
   if (!raw || raw.length < 3) return null;
+
   let name = raw.replace(/\.(mkv|mp4|avi|mov|ts|wmv|m4v|webm)$/i, '').trim();
+
+  // Detectar anime pelo grupo antes de remover o colchete
+  const isAnimeGroup = ANIME_GROUP_RE.test(name);
+  const hasCJK       = CJK_RE.test(name);
+
   // Remove [Grupo] no início
   name = name.replace(/^\[[^\]]{1,50}\]\s*/, '').trim();
   // Remove www.site.com -
   name = name.replace(/^www\.\S+\s*[-–]+\s*/i, '').trim();
-  // Remove WORD.TLD.. apenas quando TLD seguido por .. (ex: HIDRATORRENTS.ORG..)
+  // Remove WORD.TLD..
   name = name.replace(/^[A-Z0-9_-]{4,}\.[A-Z]{2,4}(?=\.\.)/i, '').replace(/^[.\s-]+/, '').trim();
+
   const norm = normalize(name);
-  // Detectar série
+
+  // Detectar série via SxxExx
   const epMatch = norm.match(EP_RE);
   let isSeries = false, season = null, episode = null;
   let serieCut = norm.length;
+
   if (epMatch) {
-    isSeries = true; season = parseInt(epMatch[1], 10); episode = parseInt(epMatch[2],
-10);
+    isSeries = true; season = parseInt(epMatch[1], 10); episode = parseInt(epMatch[2], 10);
     serieCut = epMatch.index;
   } else {
     const sm = norm.match(S_RE);
     if (sm) { isSeries = true; season = parseInt(sm[1], 10); serieCut = sm.index; }
   }
+
+  // Detectar episódio anime (- 01 ou title 01 [)
+  let animeEp = null;
+  if (!isSeries) {
+    const ae = norm.match(ANIME_EP_RE);
+    if (ae) { isSeries = true; animeEp = parseInt(ae[1], 10); serieCut = ae.index; }
+    else {
+      const ae2 = norm.match(ANIME_EP2_RE);
+      if (ae2) { isSeries = true; animeEp = parseInt(ae2[2], 10); serieCut = ae2[1].length; }
+    }
+  }
+
+  const isAnime = isAnimeGroup || hasCJK || (isSeries && animeEp !== null);
+
   // Corte técnico
   let techCut = norm.length;
   for (const re of TECH) {
     const m = norm.match(re);
     if (m && m.index < techCut) techCut = m.index;
   }
+
   // Corte pelo ano
   const ym = norm.match(YEAR_RE);
   let year = null;
   if (ym) { year = parseInt(ym[1], 10); if (ym.index < techCut) techCut = ym.index; }
+
   const cutIndex = Math.min(serieCut, techCut);
   let title = norm.substring(0, cutIndex);
-  // 1. Remover parênteses completos: (alias)
+
   title = title.replace(/\s*\([^)]*\)/g, '');
-  // 2. Remover colchetes completos: [info]
   title = title.replace(/\s*\[[^\]]*\]/g, '');
-  // 3. Remover colchete/parêntese aberto sem fechar no final
   title = title.replace(/[\s([{]+$/, '').trim();
-  // 4. Remover "- 02" de episódio anime numerado
   title = title.replace(/\s*[-–]\s*\d+\s*$/, '');
-  // 5. Remover hífen solto no final
   title = title.replace(/[\s\-–]+$/, '').trim();
   title = title.replace(/\s{2,}/g, ' ').trim();
+
   if (!title || title.length < 2) return null;
+
   title = title.split(' ').filter(Boolean)
     .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(' ');
-  return { title, year, isSeries, season, episode };
+
+  return { title, year, isSeries, isAnime, season, episode: episode ?? animeEp };
 }
+
 module.exports = { guessMediaInfo };
