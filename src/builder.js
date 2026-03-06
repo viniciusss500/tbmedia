@@ -246,22 +246,17 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
 
   if (!entries || entries.length === 0) return [];
 
-  // ── Filtrar por temporada/episódio ────────────────────────────────────────
-  // Problema: anime SubsPlease usa numeração absoluta (ep 28 = S01E28 no TMDB,
-  // mas arquivo tem season=null). O Stremio sempre envia type=series na URL de
-  // stream, mesmo para conteúdo catalogado como anime.
-  //
-  // Detectar se os entries usam numeração absoluta (maioria sem season definida).
-  // Nesse caso, ignorar o número de episódio e mostrar todos os arquivos do show.
-  //
-  // Estratégia:
-  //   1. Filtro estrito por season+episode → funciona para SxxExx
-  //   2. Se vazio, verificar se é numeração absoluta (entries sem season)
-  //      → mostrar todos os entries (usuário vê o nome do arquivo e escolhe)
-  //   3. Se não for numeração absoluta → retornar vazio (episódio não disponível)
+  // ── Filtrar por temporada/episódio ────────────────────────────────────────────
+  // Anime tem 3 esquemas de numeração conflitantes:
+  //  A) Stremio/TMDB:    season=1, episode=33  (absoluta global)
+  //  B) SubsPlease abs:  season=null, episode=33  (mesmo número que TMDB)
+  //  C) SubsPlease S2:   season=2, episode=9  (relativo à temporada)
+  //  1. Estrito: season+episode batem → SxxExx padrão
+  //  2. Só ep bate (season null/diferente) → numeração absoluta
+  //  3. É anime e sem match → numeração relativa → mostra todos os arquivos
   let filtered;
   if (type === 'series' || type === 'anime') {
-    // Camada 1: filtro estrito
+    // Camada 1: filtro estrito (season + episode)
     const strict = entries.filter(({ season: s, episode: e }) => {
       if (season != null && season !== '' && s != null && String(s) !== String(season)) return false;
       if (episode != null && episode !== '' && e != null && String(e) !== String(episode)) return false;
@@ -270,24 +265,31 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
 
     if (strict.length > 0) {
       filtered = strict;
+      console.log(`[Stream] Filtro estrito: ${filtered.length} entries`);
     } else {
-      // Detectar numeração absoluta: a maioria dos entries não tem season definida
-      const withoutSeason = entries.filter(e => e.season == null).length;
-      const usesAbsoluteNumbering = withoutSeason > entries.length / 2;
+      // Camada 2: só o episódio bate (season null/divergente = numeração absoluta)
+      const epOnly = (episode != null && episode !== '')
+        ? entries.filter(({ episode: e }) => e != null && String(e) === String(episode))
+        : [];
 
-      if (usesAbsoluteNumbering) {
-        // Anime com numeração absoluta: mostrar todos os arquivos do show
-        filtered = entries;
-        console.log(`[Stream] Fallback numeração absoluta: ${filtered.length} entries`);
+      if (epOnly.length > 0) {
+        filtered = epOnly;
+        console.log(`[Stream] Fallback ep-only (abs): ${filtered.length} entries`);
       } else {
-        // Série normal sem o episódio pedido
-        filtered = strict; // vazio
+        // Camada 3: anime com numeração relativa de temporada
+        // arquivos têm season=2 mas Stremio pede season=1 com ep absoluto
+        const { guessMediaInfo } = require('./parser');
+        const isAnimeContent = entries.some(e => {
+          const name = e.item?.name || e.item?.filename || '';
+          return guessMediaInfo(name)?.isAnime;
+        });
+        filtered = isAnimeContent ? entries : [];
+        console.log(`[Stream] Fallback anime (${isAnimeContent ? 'relativo' : 'vazio'}): ${filtered.length} entries`);
       }
     }
   } else {
     filtered = entries;
   }
-
   console.log(`[Stream] ${filtered.length} item(s) para ${indexKey} s=${season} e=${episode}`);
 
   // ── Coletar streams ────────────────────────────────────────────────────────
