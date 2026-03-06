@@ -33,11 +33,15 @@ function savePersistentCache() {
 loadPersistentCache();
 setInterval(savePersistentCache, 60_000);
 
-// ─── ÍNDICES ──────────────────────────────────────────────────────────────────
-// tmdbId → [{item, season, episode}]
-const tmdbIndex = new Map();
-// tmdbIds identificados como anime (via parser OU TMDB) — bloqueia aparição em 'series'
-const animeIds  = new Set();
+// ─── ÍNDICE ───────────────────────────────────────────────────────────────────
+const tmdbIndex = new Map(); // `series:12345` → [{item, season, episode}]
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+// Decide se um resultado do TMDB é anime.
+// Usa flag isJapaneseAnimation da searchMetadata OU campo do cache.
+function isTmdbAnime(result) {
+  return result && (result.isJapaneseAnimation === true);
+}
 
 // ─── MATCH ITEM ───────────────────────────────────────────────────────────────
 async function matchItem(item, tmdbApiKey, type, lang) {
@@ -47,18 +51,18 @@ async function matchItem(item, tmdbApiKey, type, lang) {
 
   const cached = matchCache.get(cacheKey);
   if (cached !== undefined) {
-    // Revalidar entradas antigas: se o tmdbId está no animeIds, não deve ir para 'series'
-    if (cached !== null && type === 'series' && animeIds.has(String(cached.tmdbId))) {
+    // Revalidar: se a entrada cacheada tem isJapaneseAnimation=true mas type='series' → rejeitar
+    if (cached !== null && type === 'series' && cached.isJapaneseAnimation === true) {
       matchCache.set(cacheKey, null);
       return null;
     }
-    // Revalidar tipo básico
-    if (cached !== null) {
-      const info = guessMediaInfo(name);
-      if (info) {
-        if (type === 'movie'  && (info.isSeries || info.isAnime)) { matchCache.set(cacheKey, null); return null; }
-        if (type === 'series' && info.isAnime)                    { matchCache.set(cacheKey, null); return null; }
-        if (type === 'anime'  && !info.isAnime)                   { matchCache.set(cacheKey, null); return null; }
+    // Revalidar: se type='anime' mas não é anime → rejeitar
+    if (cached !== null && type === 'anime' && cached.isJapaneseAnimation !== true) {
+      // Só revalidar se o parser também não detecta como anime (double-check)
+      const info2 = guessMediaInfo(name);
+      if (info2 && !info2.isAnime) {
+        matchCache.set(cacheKey, null);
+        return null;
       }
     }
     return cached;
@@ -67,39 +71,45 @@ async function matchItem(item, tmdbApiKey, type, lang) {
   const info = guessMediaInfo(name);
   if (!info) { matchCache.set(cacheKey, null); return null; }
 
+  // Filtro pelo parser (rápido, sem rede)
   if (type === 'movie'  && (info.isSeries || info.isAnime))  { matchCache.set(cacheKey, null); return null; }
-  if (type === 'series' && (!info.isSeries || info.isAnime)) { matchCache.set(cacheKey, null); return null; }
-  if (type === 'anime'  && !info.isAnime)                    { matchCache.set(cacheKey, null); return null; }
+  if (type === 'series' && !info.isSeries)                   { matchCache.set(cacheKey, null); return null; }
+  if (type === 'anime'  && !info.isSeries)                   { matchCache.set(cacheKey, null); return null; }
+  // Anime detectado pelo parser → não vai para 'series'
+  if (type === 'series' && info.isAnime)                     { matchCache.set(cacheKey, null); return null; }
 
   try {
     const result = await searchMetadata(tmdbApiKey, info.title, tmdbType, info.year, lang);
     if (!result) { matchCache.set(cacheKey, null); return null; }
 
-    // Se tentando 'series' mas o tmdbId já é conhecido como anime → rejeitar
-    if (type === 'series' && animeIds.has(String(result.id))) {
+    // Verificação via TMDB: anime (ja + Animation) não vai para 'series'
+    if (type === 'series' && isTmdbAnime(result)) {
+      console.log(`[TMDB] "${info.title}" é anime (ja+Animation) — excluído de séries`);
+      matchCache.set(cacheKey, null);
+      return null;
+    }
+    // Verificação via TMDB: 'anime' requer que seja anime (ja+Animation) OU parser detectou
+    if (type === 'anime' && !isTmdbAnime(result) && !info.isAnime) {
       matchCache.set(cacheKey, null);
       return null;
     }
 
-    console.log(`[TMDB] "${info.title}" → "${result.title || result.name}" (${result.id})`);
+    console.log(`[TMDB] "${info.title}" → "${result.title || result.name}" (${result.id}) anime=${isTmdbAnime(result)}`);
 
     const stremioType = type === 'anime' ? 'series' : type;
-
-    // Registrar como anime para bloquear em 'series'
-    if (type === 'anime') animeIds.add(String(result.id));
-
     const meta = {
-      id:          `torbox:${stremioType}:${result.id}`,
-      type:        stremioType,
-      name:        result.title || result.name,
-      poster:      result.poster_path ? `https://image.tmdb.org/t/p/w500${result.poster_path}` : null,
-      releaseInfo: (result.release_date || result.first_air_date || '').split('-')[0],
-      released:    result.release_date || result.first_air_date,
-      tmdbId:      result.id,
-      catalogType: type,
-      torboxItem:  item,
-      season:      info.season,
-      episode:     info.episode,
+      id:                   `torbox:${stremioType}:${result.id}`,
+      type:                 stremioType,
+      name:                 result.title || result.name,
+      poster:               result.poster_path ? `https://image.tmdb.org/t/p/w500${result.poster_path}` : null,
+      releaseInfo:          (result.release_date || result.first_air_date || '').split('-')[0],
+      released:             result.release_date || result.first_air_date,
+      tmdbId:               result.id,
+      catalogType:          type,
+      isJapaneseAnimation:  isTmdbAnime(result),
+      torboxItem:           item,
+      season:               info.season,
+      episode:              info.episode,
     };
 
     matchCache.set(cacheKey, meta);
@@ -117,7 +127,7 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
   const search    = extra?.search?.toLowerCase();
   const PAGE_SIZE = 50;
 
-  // Filtrar por tipo SEM deduplicar — todos os episódios precisam entrar no índice
+  // Filtrar por tipo sem deduplicar — todos os episódios precisam entrar no índice
   const allRelevant = [];
   for (const item of downloads) {
     const name = item.name || item.filename || '';
@@ -125,7 +135,7 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
     if (!info) continue;
     if (type === 'movie'  && (info.isSeries || info.isAnime))  continue;
     if (type === 'series' && (!info.isSeries || info.isAnime)) continue;
-    if (type === 'anime'  && !info.isAnime)                    continue;
+    if (type === 'anime'  && !info.isSeries)                   continue; // anime usa SxxExx ou formato proprio
     allRelevant.push({ item, info });
   }
 
@@ -139,7 +149,7 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
     results.push(...matched.filter(Boolean));
   }
 
-  // Popula índice com TODOS os episódios; catálogo exibe um card por show
+  // Popula índice com todos os episódios; catálogo exibe um card por show
   const seen = new Map();
   for (const meta of results) {
     const indexKey = `${meta.type}:${meta.tmdbId}`;
@@ -174,7 +184,7 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
   console.log(`[Catalog] Returning ${paginated.length} items (skip=${skip}, total=${metas.length})`);
 
   return paginated
-    .map(({ torboxItem, torboxItems, tmdbId, released, catalogType, season, episode, ...rest }) => rest)
+    .map(({ torboxItem, torboxItems, tmdbId, released, catalogType, isJapaneseAnimation, season, episode, ...rest }) => rest)
     .filter(m => m.poster);
 }
 
@@ -198,7 +208,7 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
       const name = item.name || item.filename || '';
       let found  = false;
 
-      // 1) Tentar matchCache (todos os tipos e langs)
+      // Tentar matchCache com todos os tipos e langs
       for (const t of ['movie', 'series', 'anime']) {
         for (const l of [lang, 'pt-BR', 'en-US']) {
           const c = matchCache.get(`match:${t}:${l}:${name}`);
@@ -212,12 +222,11 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
       }
     }
 
-    // 2) Fallback: busca via TMDB para candidatos plausíveis
+    // Fallback: busca via TMDB para candidatos plausíveis
     if (entries.length === 0 && tmdbApiKey) {
-      console.log(`[Stream] Cache miss total — buscando via TMDB para tmdbId=${tmdbId}`);
-      const downloads2 = await getTorBoxDownloads(torboxApiKey);
-      const tmdbType   = type === 'movie' ? 'movie' : 'series';
-      for (const item of downloads2) {
+      console.log(`[Stream] Fallback TMDB para tmdbId=${tmdbId}`);
+      const tmdbType = type === 'movie' ? 'movie' : 'series';
+      for (const item of downloads || []) {
         const name = item.name || item.filename || '';
         const info = guessMediaInfo(name);
         if (!info) continue;
@@ -238,19 +247,17 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
   if (!entries || entries.length === 0) return [];
 
   // ── Filtrar por temporada/episódio ────────────────────────────────────────
-  // BUG FIX: quando episode é informado, entradas sem episode (packs de temporada)
-  // são excluídas — mostramos APENAS o episódio exato pedido.
+  // Regra:
+  //   - season e episode informados → incluir só entradas que batem OU que são packs (sem S/E definido)
+  //   - pack (season=null) → contém todos os episódios → incluir sempre que temporada bate ou não está definida
   let filtered;
   if (type === 'series' || type === 'anime') {
     filtered = entries.filter(({ season: s, episode: e }) => {
-      // Filtro de temporada
+      // Filtro de temporada: rejeitar só se AMBOS têm season E diferem
       if (season != null && season !== '' && s != null && String(s) !== String(season)) return false;
-      // Filtro de episódio: se episódio foi especificado...
-      if (episode != null && episode !== '') {
-        // ...entradas sem número de episódio são excluídas
-        if (e == null) return false;
-        if (String(e) !== String(episode)) return false;
-      }
+      // Filtro de episódio: rejeitar só se AMBOS têm episode E diferem
+      // Packs (e=null) são INCLUÍDOS — o usuário escolhe o arquivo correto
+      if (episode != null && episode !== '' && e != null && String(e) !== String(episode)) return false;
       return true;
     });
   } else {
@@ -333,7 +340,7 @@ function formatStreamName(filename = '') {
 }
 
 function formatStreamDesc(filename = '', size, source) {
-  // Nome completo do arquivo sem extensão — sem truncar
+  // Nome completo sem extensão
   const display = filename.replace(/\.(mkv|mp4|avi|mov|ts|wmv|m4v|webm)$/i, '');
   const langStr = extractAudio(filename);
   const subs    = extractSubs(filename);
@@ -341,7 +348,6 @@ function formatStreamDesc(filename = '', size, source) {
 
   const lines = [];
   if (display) lines.push(`📄 ${display}`);
-
   const row = [
     langStr ? `🎙 ${langStr}` : '',
     subs    ? `💬 ${subs}`   : '',
@@ -349,7 +355,6 @@ function formatStreamDesc(filename = '', size, source) {
     source  ? `☁️ ${source}`  : '',
   ].filter(Boolean).join('   ');
   if (row) lines.push(row);
-
   return lines.join('\n');
 }
 
@@ -396,7 +401,6 @@ function extractAudio(n = '') {
   else if (u.match(/\bPT.?PT\b/))                 parts.push('PT-PT');
   else if (u.match(/\bLEGENDADO\b/))              parts.push('Leg.');
   else if (u.match(/\bENG(LISH)?\b/))             parts.push('EN');
-
   if      (u.match(/\bATMOS\b/))                  parts.push('Atmos');
   else if (u.match(/\bTRUEHD\b/))                 parts.push('TrueHD');
   else if (u.match(/\bDTS.?HD\b/))                parts.push('DTS-HD');
