@@ -9,8 +9,8 @@ app.get("/catalog/:type/:id.json", async (req, res) => {
     return res.json(cached);
   }
 
-  const result = await buildCatalog();
-
+const result = await getCatalog(req);
+  
   catalogCache.set(cacheKey, result);
 
   res.json(result);
