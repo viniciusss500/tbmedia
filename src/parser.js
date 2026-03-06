@@ -23,9 +23,12 @@ const ANIME_GROUPS = [
 ];
 const ANIME_GROUP_RE = new RegExp(`^\\[(${ANIME_GROUPS.join('|')})[^\\]]*\\]`, 'i');
 
-// Padrão de episódio anime: "- 01" ou título seguido de número + [
-const ANIME_EP_RE  = /\s[-–]\s+(\d{1,3})\s*(?:\[|$)/;
-const ANIME_EP2_RE = /^(.+?)\s+(\d{2,3})\s*[\[(]/;
+// Padrão de episódio anime: "- 01" ou "- 01v2" ou título seguido de número + [
+const ANIME_EP_RE  = /\s[-–]\s+(\d{1,3})(?:v\d+)?\s*(?:\[|$)/;
+const ANIME_EP2_RE = /^(.+?)\s+(\d{2,3})(?:v\d+)?\s*[\[(]/;
+
+// "2nd Season", "3rd Season", "Xth Season" → extrai número ordinal inglês
+const SEASON_ORD_EN_RE = /\b(\d+)(?:st|nd|rd|th)\s+season\b/i;
 
 // Caracteres japoneses/CJK
 const CJK_RE = /[\u3040-\u30FF\u4E00-\u9FFF]/;
@@ -77,15 +80,23 @@ function guessMediaInfo(raw) {
     serieCut = epMatch.index;
   }
 
-  // 2. Só Sxx sem episódio
+  // 2. Só Sxx sem episódio — mas ainda tenta capturar ep anime ("S2 - 01")
   if (!isSeries) {
     const sm = norm.match(S_RE);
-    if (sm) { isSeries = true; season = parseInt(sm[1], 10); serieCut = sm.index; }
+    if (sm) {
+      isSeries = true;
+      season   = parseInt(sm[1], 10);
+      serieCut = sm.index;
+      // Após o Sxx pode vir " - 01" — capturar o episódio
+      const afterS = norm.slice(sm.index + sm[0].length);
+      const ae = afterS.match(/^\s*[-\u2013]\s+(\d{1,3})(?:v\d+)?/);
+      if (ae) episode = parseInt(ae[1], 10);
+    }
   }
 
-  // 3. "Temporada X" / "Season X" / "Xª Temporada"
+  // 3. "Temporada X" / "Season X" / "Xª Temporada" / "2nd Season"
   if (!isSeries) {
-    const tw = norm.match(SEASON_WORD_RE) || norm.match(SEASON_ORD_RE);
+    const tw = norm.match(SEASON_WORD_RE) || norm.match(SEASON_ORD_RE) || norm.match(SEASON_ORD_EN_RE);
     if (tw) {
       isSeries = true;
       season   = parseInt(tw[1], 10);
@@ -95,10 +106,12 @@ function guessMediaInfo(raw) {
 
   // 4. Episódio anime: "- 01" ou "Title 01 ["
   let animeEp = null;
-  if (!isSeries) {
+  if (!isSeries || episode === null) {
     const ae = norm.match(ANIME_EP_RE);
-    if (ae) { isSeries = true; animeEp = parseInt(ae[1], 10); serieCut = ae.index; }
-    else {
+    if (ae) {
+      if (!isSeries) { isSeries = true; serieCut = ae.index; }
+      animeEp = parseInt(ae[1], 10);
+    } else if (!isSeries) {
       const ae2 = norm.match(ANIME_EP2_RE);
       if (ae2) { isSeries = true; animeEp = parseInt(ae2[2], 10); serieCut = ae2[1].length; }
     }
@@ -123,8 +136,9 @@ function guessMediaInfo(raw) {
 
   title = title.replace(/\s*\([^)]*\)/g, '');
   title = title.replace(/\s*\[[^\]]*\]/g, '');
-  // Remove "- 1ª Temporada" ou "- Season 2" que ficaram no título
+  // Remove "- 1ª Temporada" ou "- Season 2" ou "2nd Season" que ficaram no título
   title = title.replace(/\s*[-–]\s*(?:\d+[aªº°]\s*)?(?:temporada|season).*$/i, '');
+  title = title.replace(/\s+\d+(?:st|nd|rd|th)\s+season.*$/i, '');
   title = title.replace(/[\s([{]+$/, '').trim();
   title = title.replace(/\s*[-–]\s*\d+\s*$/, '');
   title = title.replace(/[\s\-–]+$/, '').trim();
