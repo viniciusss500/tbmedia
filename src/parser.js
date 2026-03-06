@@ -1,142 +1,40 @@
-/**
- * Parser de nomes de torrent/usenet.
- */
+export function parseFilename(name) {
+  const clean = name.replace(/\./g, " ");
 
-const YEAR_RE = /\b(19[5-9]\d|20[0-3]\d)\b/;
-const EP_RE   = /[Ss](\d{1,2})[Ee](\d{1,2})/;
-const S_RE    = /\b[Ss](\d{1,2})\b(?![Ee\d])/;
+  const seasonEpisode = clean.match(/S(\d+)E(\d+)/i);
+  const episodeOnly = clean.match(/\b(\d{2,3})\b/);
 
-// "1ª Temporada", "2a Temporada", "Season 3", "Temporada 2"
-const SEASON_WORD_RE = /\b(?:season|temporada)\s*(\d{1,2})\b/i;
-// "1ª Temporada" com ordinal pt
-const SEASON_ORD_RE  = /\b(\d{1,2})[aªº°]\s+temporada\b/i;
-// "Parte 2", "Part 2"  (mini-séries)
-const PART_RE        = /\b(?:parte?|part)\s*(\d)\b/i;
+  const animeIndicators = [
+    /SubsPlease/i,
+    /Erai-raws/i,
+    /\[.*?\]/,
+    /1080p/i,
+    /720p/i
+  ];
 
-// Grupos de release de anime conhecidos
-const ANIME_GROUPS = [
-  'SubsPlease','Erai-raws','HorribleSubs','WF','ASW','Yameii','Judas',
-  'LostYears','Tsundere-Raws','Nii-sama','Okay-Subs','GS','Asenshi',
-  'Commie','FFF','Doki','Kira','GJM','CBM','VCB-Studio','ANE',
-  'OZC','Underwater','UTW','NanoSubs','Chihiro','Coalgirls','THORA',
-  'BlurayDesuYo','KH','Ohys-Raws','RAW-NIBL','Moozzi2','IrizaRaws',
-];
-const ANIME_GROUP_RE = new RegExp(`^\\[(${ANIME_GROUPS.join('|')})[^\\]]*\\]`, 'i');
+  const isAnime = animeIndicators.some(r => r.test(name));
 
-// Padrão de episódio anime: "- 01" ou título seguido de número + [
-const ANIME_EP_RE  = /\s[-–]\s+(\d{1,3})\s*(?:\[|$)/;
-const ANIME_EP2_RE = /^(.+?)\s+(\d{2,3})\s*[\[(]/;
+  let season = null;
+  let episode = null;
 
-// Caracteres japoneses/CJK
-const CJK_RE = /[\u3040-\u30FF\u4E00-\u9FFF]/;
+  if (seasonEpisode) {
+    season = Number(seasonEpisode[1]);
+    episode = Number(seasonEpisode[2]);
+  } else if (isAnime && episodeOnly) {
+    season = 1;
+    episode = Number(episodeOnly[1]);
+  }
 
-const TECH = [
-  /\b(2160p|1080p|720p|480p|360p)\b/i,
-  /\b(4k|uhd)\b/i,
-  /\b(web[-\s]?dl|webdl|web[-\s]?rip|webrip|bluray|blu[-\s]?ray|bdrip|brrip|hdtv|hdrip|dvdrip|dvdscr|camrip|hdtc|hdcam)\b/i,
-  /\b(x264|x265|h264|h\.?265|hevc|avc|xvid)\b/i,
-  /\b(ddp?5[\s.]1|dd5[\s.]1|aac|ac3|eac3|dts|truehd|atmos|opus|flac)\b/i,
-  /\b(hdr10?|dolby[\s.]?vision|sdr)\b/i,
-  /\b(remux|proper|repack|extended)\b/i,
-  /\b(dual|dublado|legendado|nacional|plsub|multi[-\s]?sub|multi[-\s]?audio)\b/i,
-  /\b(amzn|nflx|hmax|dsnp|iqiyi|adn)\b/i,
-];
+  const title = clean
+    .replace(/\[.*?\]/g, "")
+    .replace(/S\d+E\d+/i, "")
+    .replace(/\b\d{3,4}p\b/i, "")
+    .trim();
 
-function normalize(s) {
-  return s.replace(/[._]/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  return {
+    title,
+    season,
+    episode,
+    isAnime
+  };
 }
-
-function guessMediaInfo(raw) {
-  if (!raw || raw.length < 3) return null;
-
-  let name = raw.replace(/\.(mkv|mp4|avi|mov|ts|wmv|m4v|webm)$/i, '').trim();
-
-  // Detectar anime pelo grupo antes de remover o colchete
-  const isAnimeGroup = ANIME_GROUP_RE.test(name);
-  const hasCJK       = CJK_RE.test(name);
-
-  // Remove [Grupo] no início
-  name = name.replace(/^\[[^\]]{1,50}\]\s*/, '').trim();
-  // Remove www.site.com -
-  name = name.replace(/^www\.\S+\s*[-–]+\s*/i, '').trim();
-  // Remove WORD.TLD..
-  name = name.replace(/^[A-Z0-9_-]{4,}\.[A-Z]{2,4}(?=\.\.)/i, '').replace(/^[.\s-]+/, '').trim();
-
-  const norm = normalize(name);
-
-  // ── Detectar série ─────────────────────────────────────────────────────────
-  let isSeries = false, season = null, episode = null;
-  let serieCut = norm.length;
-
-  // 1. SxxExx (padrão universal)
-  const epMatch = norm.match(EP_RE);
-  if (epMatch) {
-    isSeries = true;
-    season   = parseInt(epMatch[1], 10);
-    episode  = parseInt(epMatch[2], 10);
-    serieCut = epMatch.index;
-  }
-
-  // 2. Só Sxx sem episódio
-  if (!isSeries) {
-    const sm = norm.match(S_RE);
-    if (sm) { isSeries = true; season = parseInt(sm[1], 10); serieCut = sm.index; }
-  }
-
-  // 3. "Temporada X" / "Season X" / "Xª Temporada"
-  if (!isSeries) {
-    const tw = norm.match(SEASON_WORD_RE) || norm.match(SEASON_ORD_RE);
-    if (tw) {
-      isSeries = true;
-      season   = parseInt(tw[1], 10);
-      serieCut = tw.index;
-    }
-  }
-
-  // 4. Episódio anime: "- 01" ou "Title 01 ["
-  let animeEp = null;
-  if (!isSeries) {
-    const ae = norm.match(ANIME_EP_RE);
-    if (ae) { isSeries = true; animeEp = parseInt(ae[1], 10); serieCut = ae.index; }
-    else {
-      const ae2 = norm.match(ANIME_EP2_RE);
-      if (ae2) { isSeries = true; animeEp = parseInt(ae2[2], 10); serieCut = ae2[1].length; }
-    }
-  }
-
-  const isAnime = isAnimeGroup || hasCJK || (isSeries && animeEp !== null);
-
-  // ── Corte técnico ──────────────────────────────────────────────────────────
-  let techCut = norm.length;
-  for (const re of TECH) {
-    const m = norm.match(re);
-    if (m && m.index < techCut) techCut = m.index;
-  }
-
-  // Corte pelo ano
-  const ym = norm.match(YEAR_RE);
-  let year = null;
-  if (ym) { year = parseInt(ym[1], 10); if (ym.index < techCut) techCut = ym.index; }
-
-  const cutIndex = Math.min(serieCut, techCut);
-  let title = norm.substring(0, cutIndex);
-
-  title = title.replace(/\s*\([^)]*\)/g, '');
-  title = title.replace(/\s*\[[^\]]*\]/g, '');
-  // Remove "- 1ª Temporada" ou "- Season 2" que ficaram no título
-  title = title.replace(/\s*[-–]\s*(?:\d+[aªº°]\s*)?(?:temporada|season).*$/i, '');
-  title = title.replace(/[\s([{]+$/, '').trim();
-  title = title.replace(/\s*[-–]\s*\d+\s*$/, '');
-  title = title.replace(/[\s\-–]+$/, '').trim();
-  title = title.replace(/\s{2,}/g, ' ').trim();
-
-  if (!title || title.length < 2) return null;
-
-  title = title.split(' ').filter(Boolean)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ');
-
-  return { title, year, isSeries, isAnime, season, episode: episode ?? animeEp };
-}
-
-module.exports = { guessMediaInfo };
