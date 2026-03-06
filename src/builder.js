@@ -189,41 +189,70 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
 }
 
 // ─── META ─────────────────────────────────────────────────────────────────────
-// Retorna metadata filtrada: para séries/anime, só inclui episódios que estão
-// disponíveis no tmdbIndex (i.e., foram baixados e indexados).
-async function buildMeta(tmdbId, type, tmdbApiKey, lang = 'pt-BR') {
-  const tmdbType = type === 'anime' ? 'series' : type;
+// Retorna metadata filtrada: busca downloads do TorBox e faz match via TMDB
+// para filtrar só os episódios disponíveis. Funciona stateless (Vercel).
+async function buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey) {
+  const tmdbType = type === 'series' || type === 'anime' ? 'series' : 'movie';
   const meta = await getMetadata(tmdbApiKey, tmdbId, tmdbType, lang);
   if (!meta || tmdbType === 'movie') return meta;
+  if (!torboxApiKey) return meta;
 
-  // Filtrar videos para mostrar só eps disponíveis no TorBox
-  const indexKey = `series:${tmdbId}`;
-  const entries  = tmdbIndex.get(indexKey);
-  if (!entries || entries.length === 0) return meta;
+  try {
+    const downloads = await getTorBoxDownloads(torboxApiKey);
+    const availableEps = new Set();
+    let hasFullPack = false;
+    // Cache de títulos já buscados no TMDB nesta request (evita N calls para o mesmo show)
+    const titleCache = new Map();
 
-  // Coletar todos os episódios disponíveis no índice
-  const { guessMediaInfo } = require('./parser');
-  const availableEps = new Set();
-  for (const entry of entries) {
-    if (entry.episode != null) {
-      // episode pode ser absoluto (season=null) ou relativo (season=N)
-      availableEps.add(`${entry.season ?? '*'}:${entry.episode}`);
-      availableEps.add(`*:${entry.episode}`); // sempre adicionar versão abs
-    } else {
-      // Pack/torrent sem episódio parseado: tentar via nome dos arquivos
-      // (será tratado como "todos disponíveis" para esse item)
-      availableEps.add('*:*');
+    for (const item of downloads) {
+      const name = item.name || item.filename || '';
+      const info = guessMediaInfo(name);
+      if (!info || !info.isSeries) continue;
+
+      // 1) matchCache em memória (populado se buildCatalog já rodou na mesma instância)
+      let matched = false;
+      for (const t of ['anime', 'series']) {
+        for (const l of [lang, 'pt-BR', 'en-US']) {
+          const c = matchCache.get(`match:${t}:${l}:${name}`);
+          if (c && String(c.tmdbId) === String(tmdbId)) { matched = true; break; }
+        }
+        if (matched) break;
+      }
+
+      // 2) Fallback TMDB direto (stateless — Vercel sem cache em memória)
+      if (!matched && tmdbApiKey) {
+        const tk = info.title + '|' + (info.year || '');
+        if (!titleCache.has(tk)) {
+          try {
+            const r = await searchMetadata(tmdbApiKey, info.title, 'tv', info.year, lang);
+            titleCache.set(tk, r ? String(r.id) : null);
+          } catch { titleCache.set(tk, null); }
+        }
+        if (titleCache.get(tk) === String(tmdbId)) matched = true;
+      }
+
+      if (!matched) continue;
+
+      if (info.episode != null) {
+        availableEps.add(`*:${info.episode}`);
+        if (info.season != null) availableEps.add(`${info.season}:${info.episode}`);
+      } else {
+        hasFullPack = true;
+      }
     }
+
+    if (hasFullPack) return meta; // pack completo → mostra tudo
+
+    if (availableEps.size > 0) {
+      meta.videos = (meta.videos || []).filter(v =>
+        availableEps.has(`*:${v.episode}`) || availableEps.has(`${v.season}:${v.episode}`)
+      );
+      console.log(`[Meta] tmdbId=${tmdbId} → ${meta.videos.length} eps disponíveis de ${(meta.videos || []).length + availableEps.size}`);
+    }
+    // availableEps.size === 0 → sem match → retorna tudo (fallback seguro)
+  } catch (e) {
+    console.error('[Meta] Erro ao filtrar eps:', e.message);
   }
-
-  // Se tem um pack completo (*:*) → não filtra, todos os eps estão disponíveis
-  if (availableEps.has('*:*')) return meta;
-
-  meta.videos = (meta.videos || []).filter(v => {
-    const absKey    = `*:${v.episode}`;
-    const strictKey = `${v.season}:${v.episode}`;
-    return availableEps.has(absKey) || availableEps.has(strictKey);
-  });
 
   return meta;
 }
