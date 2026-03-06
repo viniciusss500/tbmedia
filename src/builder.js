@@ -33,8 +33,11 @@ function savePersistentCache() {
 loadPersistentCache();
 setInterval(savePersistentCache, 60_000);
 
-// ─── ÍNDICE tmdbId → [entries] ────────────────────────────────────────────────
-const tmdbIndex = new Map(); // `series:12345` → [{item, season, episode}, ...]
+// ─── ÍNDICES ──────────────────────────────────────────────────────────────────
+// tmdbId → [{item, season, episode}]
+const tmdbIndex = new Map();
+// tmdbIds identificados como anime (via parser OU TMDB) — bloqueia aparição em 'series'
+const animeIds  = new Set();
 
 // ─── MATCH ITEM ───────────────────────────────────────────────────────────────
 async function matchItem(item, tmdbApiKey, type, lang) {
@@ -44,7 +47,12 @@ async function matchItem(item, tmdbApiKey, type, lang) {
 
   const cached = matchCache.get(cacheKey);
   if (cached !== undefined) {
-    // Revalidar entradas antigas: anime nunca deve aparecer em 'series'
+    // Revalidar entradas antigas: se o tmdbId está no animeIds, não deve ir para 'series'
+    if (cached !== null && type === 'series' && animeIds.has(String(cached.tmdbId))) {
+      matchCache.set(cacheKey, null);
+      return null;
+    }
+    // Revalidar tipo básico
     if (cached !== null) {
       const info = guessMediaInfo(name);
       if (info) {
@@ -67,9 +75,19 @@ async function matchItem(item, tmdbApiKey, type, lang) {
     const result = await searchMetadata(tmdbApiKey, info.title, tmdbType, info.year, lang);
     if (!result) { matchCache.set(cacheKey, null); return null; }
 
+    // Se tentando 'series' mas o tmdbId já é conhecido como anime → rejeitar
+    if (type === 'series' && animeIds.has(String(result.id))) {
+      matchCache.set(cacheKey, null);
+      return null;
+    }
+
     console.log(`[TMDB] "${info.title}" → "${result.title || result.name}" (${result.id})`);
 
     const stremioType = type === 'anime' ? 'series' : type;
+
+    // Registrar como anime para bloquear em 'series'
+    if (type === 'anime') animeIds.add(String(result.id));
+
     const meta = {
       id:          `torbox:${stremioType}:${result.id}`,
       type:        stremioType,
@@ -183,9 +201,9 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
       // 1) Tentar matchCache (todos os tipos e langs)
       for (const t of ['movie', 'series', 'anime']) {
         for (const l of [lang, 'pt-BR', 'en-US']) {
-          const cached = matchCache.get(`match:${t}:${l}:${name}`);
-          if (cached && String(cached.tmdbId) === String(tmdbId)) {
-            entries.push({ item, season: cached.season, episode: cached.episode });
+          const c = matchCache.get(`match:${t}:${l}:${name}`);
+          if (c && String(c.tmdbId) === String(tmdbId)) {
+            entries.push({ item, season: c.season, episode: c.episode });
             found = true;
             break;
           }
@@ -194,19 +212,17 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
       }
     }
 
-    // 2) Se ainda vazio — busca direcionada: parseia e chama TMDB só para os candidatos plausíveis
+    // 2) Fallback: busca via TMDB para candidatos plausíveis
     if (entries.length === 0 && tmdbApiKey) {
       console.log(`[Stream] Cache miss total — buscando via TMDB para tmdbId=${tmdbId}`);
       const downloads2 = await getTorBoxDownloads(torboxApiKey);
       const tmdbType   = type === 'movie' ? 'movie' : 'series';
-
       for (const item of downloads2) {
         const name = item.name || item.filename || '';
         const info = guessMediaInfo(name);
         if (!info) continue;
-        if (tmdbType === 'movie'  && info.isSeries) continue;
+        if (tmdbType === 'movie'  && info.isSeries)  continue;
         if (tmdbType === 'series' && !info.isSeries) continue;
-
         try {
           const result = await searchMetadata(tmdbApiKey, info.title, tmdbType, info.year, lang);
           if (result && String(result.id) === String(tmdbId)) {
@@ -221,18 +237,29 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
 
   if (!entries || entries.length === 0) return [];
 
-  // Filtrar por temporada/episódio
-  const filtered = (type === 'series' || type === 'anime')
-    ? entries.filter(({ season: s, episode: e }) => {
-        if (season  && s != null && String(s) !== String(season))  return false;
-        if (episode && e != null && String(e) !== String(episode)) return false;
-        return true;
-      })
-    : entries;
+  // ── Filtrar por temporada/episódio ────────────────────────────────────────
+  // BUG FIX: quando episode é informado, entradas sem episode (packs de temporada)
+  // são excluídas — mostramos APENAS o episódio exato pedido.
+  let filtered;
+  if (type === 'series' || type === 'anime') {
+    filtered = entries.filter(({ season: s, episode: e }) => {
+      // Filtro de temporada
+      if (season != null && season !== '' && s != null && String(s) !== String(season)) return false;
+      // Filtro de episódio: se episódio foi especificado...
+      if (episode != null && episode !== '') {
+        // ...entradas sem número de episódio são excluídas
+        if (e == null) return false;
+        if (String(e) !== String(episode)) return false;
+      }
+      return true;
+    });
+  } else {
+    filtered = entries;
+  }
 
   console.log(`[Stream] ${filtered.length} item(s) para ${indexKey} s=${season} e=${episode}`);
 
-  // Coletar streams com metadados para ordenação
+  // ── Coletar streams ────────────────────────────────────────────────────────
   const rawStreams = [];
   for (const { item } of filtered) {
     const files      = await getTorBoxFiles(torboxApiKey, item.source, item.id);
@@ -255,17 +282,13 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
     }
   }
 
-  // Ordenar: 1) idioma 2) resolução 3) tamanho
-  const langCode = lang.split('-')[0].toLowerCase();
+  // ── Ordenar: 1) idioma 2) resolução 3) tamanho ─────────────────────────────
+  const langCode = (lang || 'pt-BR').split('-')[0].toLowerCase();
   rawStreams.sort((a, b) => {
-    const la = langScore(a.fname, langCode);
-    const lb = langScore(b.fname, langCode);
-    if (lb !== la) return lb - la;
-
-    const qa = qualityScore(a.fname);
-    const qb = qualityScore(b.fname);
-    if (qb !== qa) return qb - qa;
-
+    const dl = langScore(b.fname, langCode) - langScore(a.fname, langCode);
+    if (dl !== 0) return dl;
+    const dq = qualityScore(b.fname) - qualityScore(a.fname);
+    if (dq !== 0) return dq;
     return b.size - a.size;
   });
 
@@ -285,9 +308,7 @@ function langScore(n = '', langCode = 'pt') {
     if (u.match(/\bPT.?BR\b|\bPT.?PT\b/))              return 2;
     if (u.match(/\bLEGENDADO\b|\bPLSUB\b/))            return 1;
   }
-  if (langCode === 'en') {
-    if (u.match(/\bENGLISH\b|\bENG\b/)) return 2;
-  }
+  if (langCode === 'en' && u.match(/\bENGLISH\b|\bENG\b/)) return 2;
   return 0;
 }
 
@@ -302,22 +323,25 @@ function qualityScore(n = '') {
 
 // ─── FORMATAÇÃO ───────────────────────────────────────────────────────────────
 function formatStreamName(filename = '') {
-  const q   = extractQuality(filename);
-  const c   = extractCodec(filename);
-  const hdr = extractHDR(filename);
-  const src = extractSource(filename);
-  const badges = [q, hdr, c, src].filter(Boolean).join(' · ');
+  const badges = [
+    extractQuality(filename),
+    extractHDR(filename),
+    extractCodec(filename),
+    extractSource(filename),
+  ].filter(Boolean).join(' · ');
   return badges ? `⚡ TorBox · ${badges}` : '⚡ TorBox';
 }
 
 function formatStreamDesc(filename = '', size, source) {
+  // Nome completo do arquivo sem extensão — sem truncar
+  const display = filename.replace(/\.(mkv|mp4|avi|mov|ts|wmv|m4v|webm)$/i, '');
   const langStr = extractAudio(filename);
   const subs    = extractSubs(filename);
   const sz      = size ? formatBytes(size) : '';
-  const display = truncateFilename(filename, 65);
 
   const lines = [];
-  if (display)  lines.push(`📄 ${display}`);
+  if (display) lines.push(`📄 ${display}`);
+
   const row = [
     langStr ? `🎙 ${langStr}` : '',
     subs    ? `💬 ${subs}`   : '',
@@ -325,12 +349,8 @@ function formatStreamDesc(filename = '', size, source) {
     source  ? `☁️ ${source}`  : '',
   ].filter(Boolean).join('   ');
   if (row) lines.push(row);
-  return lines.join('\n');
-}
 
-function truncateFilename(name = '', max = 65) {
-  const clean = name.replace(/\.(mkv|mp4|avi|mov|ts|wmv|m4v|webm)$/i, '');
-  return clean.length <= max ? clean : clean.slice(0, max - 1) + '…';
+  return lines.join('\n');
 }
 
 function extractQuality(n = '') {
@@ -354,7 +374,7 @@ function extractHDR(n = '') {
   const u = n.toUpperCase();
   if (u.match(/DOLBY.?VISION|DV\b/)) return 'Dolby Vision';
   if (u.match(/HDR10\+/))            return 'HDR10+';
-  if (u.match(/\bHDR\b/))           return 'HDR';
+  if (u.match(/\bHDR\b/))            return 'HDR';
   return '';
 }
 
@@ -371,26 +391,26 @@ function extractSource(n = '') {
 function extractAudio(n = '') {
   const u = n.toUpperCase();
   const parts = [];
-  if      (u.match(/\bDUAL\b|\bDUBLADO\b/))       parts.push('Dublado');
-  else if (u.match(/\bNACIONAL\b|\bPT.?BR\b/))     parts.push('PT-BR');
-  else if (u.match(/\bPT.?PT\b/))                  parts.push('PT-PT');
-  else if (u.match(/\bLEGENDADO\b/))               parts.push('Leg.');
-  else if (u.match(/\bENG(LISH)?\b/))              parts.push('EN');
+  if      (u.match(/\bDUAL\b|\bDUBLADO\b/))      parts.push('Dublado');
+  else if (u.match(/\bNACIONAL\b|\bPT.?BR\b/))    parts.push('PT-BR');
+  else if (u.match(/\bPT.?PT\b/))                 parts.push('PT-PT');
+  else if (u.match(/\bLEGENDADO\b/))              parts.push('Leg.');
+  else if (u.match(/\bENG(LISH)?\b/))             parts.push('EN');
 
-  if      (u.match(/\bATMOS\b/))                   parts.push('Atmos');
-  else if (u.match(/\bTRUEHD\b/))                  parts.push('TrueHD');
-  else if (u.match(/\bDTS.?HD\b/))                 parts.push('DTS-HD');
-  else if (u.match(/\bDTS\b/))                     parts.push('DTS');
-  else if (u.match(/\bDDP?5\.?1\b|\bDD5\.?1\b/))  parts.push('DD5.1');
-  else if (u.match(/\bAAC\b/))                     parts.push('AAC');
+  if      (u.match(/\bATMOS\b/))                  parts.push('Atmos');
+  else if (u.match(/\bTRUEHD\b/))                 parts.push('TrueHD');
+  else if (u.match(/\bDTS.?HD\b/))                parts.push('DTS-HD');
+  else if (u.match(/\bDTS\b/))                    parts.push('DTS');
+  else if (u.match(/\bDDP?5\.?1\b|\bDD5\.?1\b/)) parts.push('DD5.1');
+  else if (u.match(/\bAAC\b/))                    parts.push('AAC');
   return parts.join(' · ');
 }
 
 function extractSubs(n = '') {
   const u = n.toUpperCase();
-  if (u.match(/\bMULTI.?SUB\b/))                          return 'Multi';
-  if (u.match(/\bPLSUB\b/))                               return 'PT';
-  if (u.match(/\bLEGENDADO\b/) && !u.match(/\bDUAL\b/))  return 'PT-BR';
+  if (u.match(/\bMULTI.?SUB\b/))                         return 'Multi';
+  if (u.match(/\bPLSUB\b/))                              return 'PT';
+  if (u.match(/\bLEGENDADO\b/) && !u.match(/\bDUAL\b/)) return 'PT-BR';
   return '';
 }
 
