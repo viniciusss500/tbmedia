@@ -178,7 +178,7 @@ app.get('/:token/meta/:type/:id.json', async (req, res) => {
   const config = decodeConfig(req.params.token);
   if (!config) return res.json({ meta: null });
 
-  const { tmdbApiKey, lang = 'pt-BR' } = config;
+  const { torboxApiKey, tmdbApiKey, lang = 'pt-BR' } = config;
   const { type, id } = req.params;
   if (!tmdbApiKey || !id.startsWith('torbox:')) return res.json({ meta: null });
 
@@ -188,7 +188,7 @@ app.get('/:token/meta/:type/:id.json', async (req, res) => {
 
   try {
     const tmdbId = id.split(':')[2];
-    const meta   = await buildMeta(tmdbId, type, tmdbApiKey, lang);
+    const meta   = await buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey);
     const result = { meta };
     cache.set(cacheKey, result, 3600);
     res.json(result);
