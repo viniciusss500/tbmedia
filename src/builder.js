@@ -189,9 +189,43 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
 }
 
 // ─── META ─────────────────────────────────────────────────────────────────────
+// Retorna metadata filtrada: para séries/anime, só inclui episódios que estão
+// disponíveis no tmdbIndex (i.e., foram baixados e indexados).
 async function buildMeta(tmdbId, type, tmdbApiKey, lang = 'pt-BR') {
   const tmdbType = type === 'anime' ? 'series' : type;
-  return await getMetadata(tmdbApiKey, tmdbId, tmdbType, lang);
+  const meta = await getMetadata(tmdbApiKey, tmdbId, tmdbType, lang);
+  if (!meta || tmdbType === 'movie') return meta;
+
+  // Filtrar videos para mostrar só eps disponíveis no TorBox
+  const indexKey = `series:${tmdbId}`;
+  const entries  = tmdbIndex.get(indexKey);
+  if (!entries || entries.length === 0) return meta;
+
+  // Coletar todos os episódios disponíveis no índice
+  const { guessMediaInfo } = require('./parser');
+  const availableEps = new Set();
+  for (const entry of entries) {
+    if (entry.episode != null) {
+      // episode pode ser absoluto (season=null) ou relativo (season=N)
+      availableEps.add(`${entry.season ?? '*'}:${entry.episode}`);
+      availableEps.add(`*:${entry.episode}`); // sempre adicionar versão abs
+    } else {
+      // Pack/torrent sem episódio parseado: tentar via nome dos arquivos
+      // (será tratado como "todos disponíveis" para esse item)
+      availableEps.add('*:*');
+    }
+  }
+
+  // Se tem um pack completo (*:*) → não filtra, todos os eps estão disponíveis
+  if (availableEps.has('*:*')) return meta;
+
+  meta.videos = (meta.videos || []).filter(v => {
+    const absKey    = `*:${v.episode}`;
+    const strictKey = `${v.season}:${v.episode}`;
+    return availableEps.has(absKey) || availableEps.has(strictKey);
+  });
+
+  return meta;
 }
 
 // ─── STREAMS ──────────────────────────────────────────────────────────────────
@@ -298,8 +332,30 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
     const files      = await getTorBoxFiles(torboxApiKey, item.source, item.id);
     const videoFiles = files.filter(f => isVideoFile(f.name || f.short_name));
 
-    if (videoFiles.length > 0) {
-      for (const file of videoFiles) {
+    // Se é anime/série com ep específico pedido, filtrar arquivos pelo ep
+    // (necessário quando o item é um pack com vários eps)
+    let targetFiles = videoFiles;
+    if ((type === 'series' || type === 'anime') && episode != null && episode !== '' && videoFiles.length > 1) {
+      const { guessMediaInfo } = require('./parser');
+      const byEp = videoFiles.filter(f => {
+        const fname = f.name || f.short_name || '';
+        const info  = guessMediaInfo(fname);
+        if (!info) return false;
+        // Match por ep absoluto OU ep relativo
+        if (info.episode != null && String(info.episode) === String(episode)) return true;
+        if (info.season != null && String(info.season) === String(season) &&
+            info.episode != null && String(info.episode) === String(episode)) return true;
+        return false;
+      });
+      if (byEp.length > 0) {
+        targetFiles = byEp;
+        console.log(`[Stream] Pack filtrado: ${byEp.length}/${videoFiles.length} arquivos para s=${season} e=${episode}`);
+      }
+      // Se byEp vazio, mantém todos (melhor que retornar nada)
+    }
+
+    if (targetFiles.length > 0) {
+      for (const file of targetFiles) {
         try {
           const url = await getTorBoxStreamLink(torboxApiKey, item.source, item.id, file.id);
           if (!url) continue;
