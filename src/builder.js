@@ -247,19 +247,37 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
   if (!entries || entries.length === 0) return [];
 
   // ── Filtrar por temporada/episódio ────────────────────────────────────────
-  // Regra:
-  //   - season e episode informados → incluir só entradas que batem OU que são packs (sem S/E definido)
-  //   - pack (season=null) → contém todos os episódios → incluir sempre que temporada bate ou não está definida
+  // Problema: anime SubsPlease usa numeração absoluta (ep 61 = S03E14 no TMDB).
+  // O Stremio envia o número relativo da temporada (season=3, episode=14).
+  // Se filtrarmos por episode=14 mas o arquivo tem episode=61 → zero resultados.
+  //
+  // Estratégia em 3 camadas:
+  //   1. Filtro estrito por season+episode (funciona para séries com SxxExx)
+  //   2. Se vazio, filtro só por season (para anime com numeração absoluta)
+  //   3. Se ainda vazio, todos os entries (pack geral ou numeração incompatível)
   let filtered;
   if (type === 'series' || type === 'anime') {
-    filtered = entries.filter(({ season: s, episode: e }) => {
-      // Filtro de temporada: rejeitar só se AMBOS têm season E diferem
+    // Camada 1: filtro estrito
+    const strict = entries.filter(({ season: s, episode: e }) => {
       if (season != null && season !== '' && s != null && String(s) !== String(season)) return false;
-      // Filtro de episódio: rejeitar só se AMBOS têm episode E diferem
-      // Packs (e=null) são INCLUÍDOS — o usuário escolhe o arquivo correto
       if (episode != null && episode !== '' && e != null && String(e) !== String(episode)) return false;
       return true;
     });
+
+    if (strict.length > 0) {
+      filtered = strict;
+    } else if (type === 'anime') {
+      // Camada 2: para anime, ignorar episódio (numeração absoluta incompatível)
+      // Filtrar só por season se disponível
+      const bySeason = entries.filter(({ season: s }) => {
+        if (season != null && season !== '' && s != null && String(s) !== String(season)) return false;
+        return true;
+      });
+      filtered = bySeason.length > 0 ? bySeason : entries;
+      console.log(`[Stream] Anime fallback (numeração absoluta): ${filtered.length} entries`);
+    } else {
+      filtered = strict; // séries: respeitar filtro estrito (retorna vazio se não tiver)
+    }
   } else {
     filtered = entries;
   }
