@@ -1,3 +1,4 @@
+import { getCachedCatalog } from "./cache/catalogCache.js";
 import express from "express";
 import cors from "cors";
 import NodeCache from "node-cache";
@@ -36,7 +37,7 @@ app.get("/:config/catalog/:type/:id.json", async (req, res) => {
 
     console.log(`[Catalog] type=${id}`);
 
-    const metas = await getCatalog(type, id, req);
+    const metas = await getCachedCatalog(type, id, req);
 
     const response = { metas };
 
