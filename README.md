@@ -1,10 +1,14 @@
 # 🎬 TorBox Stremio Addon
 
-Addon para o Stremio que exibe seu catálogo pessoal do **TorBox** (torrents e usenet) com metadados em **Português BR** obtidos do TMDB.
+> 🇧🇷 [Português](#português) · 🇺🇸 [English](#english)
 
 ---
 
-## ✨ Funcionalidades
+## Português
+
+Addon para o Stremio que exibe seu catálogo pessoal do **TorBox** (torrents e usenet) com metadados em **Português BR** obtidos do TMDB.
+
+### ✨ Funcionalidades
 
 - 📂 **Catálogo de Filmes e Séries** — exibe todo o conteúdo baixado no TorBox
 - 🇧🇷 **Metadados em PT-BR** — título, sinopse, pôster e backdrop do TMDB
@@ -16,9 +20,9 @@ Addon para o Stremio que exibe seu catálogo pessoal do **TorBox** (torrents e u
 
 ---
 
-## 🚀 Deploy Rápido
+### 🚀 Deploy Rápido
 
-### Opção 1 — Vercel (recomendado, grátis)
+#### Opção 1 — Vercel (recomendado, grátis)
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/SEU_USUARIO/torbox-stremio-addon)
 
@@ -30,7 +34,7 @@ Addon para o Stremio que exibe seu catálogo pessoal do **TorBox** (torrents e u
 
 ---
 
-### Opção 2 — Render (grátis)
+#### Opção 2 — Render (grátis)
 
 1. Faça um fork deste repositório no GitHub
 2. Acesse [render.com](https://render.com) → New → Web Service
@@ -44,7 +48,7 @@ Addon para o Stremio que exibe seu catálogo pessoal do **TorBox** (torrents e u
 
 ---
 
-## 🔧 Configuração no Stremio
+### 🔧 Configuração no Stremio
 
 Após o deploy, instale o addon no Stremio:
 
@@ -66,7 +70,7 @@ stremio://seu-projeto.vercel.app/manifest.json
 
 ---
 
-## 🛠️ Desenvolvimento Local
+### 🛠️ Desenvolvimento Local
 
 ```bash
 # Instalar dependências
@@ -84,38 +88,41 @@ Para configurar localmente, use: `http://localhost:7860/configure`
 
 ---
 
-## 📁 Estrutura do Projeto
+### 📁 Estrutura do Projeto
 
 ```
 torbox-stremio-addon/
-├── index.js          # Servidor principal + manifest do Stremio
+├── Index.js          # Entry point local (inicia o servidor na porta 7860)
+├── app.js            # Configuração Express + rotas do addon Stremio
+├── api/
+│   └── server.js     # Entry point serverless (Vercel)
 ├── src/
 │   ├── torbox.js     # Integração com a API do TorBox
 │   ├── tmdb.js       # Integração com a API do TMDB (PT-BR)
 │   ├── builder.js    # Constrói catálogo, meta e streams
 │   └── parser.js     # Parser inteligente de nomes de arquivos
+├── configure.html    # Página de configuração do addon
 ├── vercel.json       # Config para deploy no Vercel
-├── render.yaml       # Config para deploy no Render
 └── package.json
 ```
 
 ---
 
-## 🔑 APIs Utilizadas
+### 🔑 APIs Utilizadas
 
-### TorBox API
+#### TorBox API
 - `GET /v1/api/torrents/mylist` — lista todos os torrents
-- `GET /v1/api/usenet/mylist` — lista todos os usenet
+- `GET /v1/api/usenet/mylist` — lista todos os downloads usenet
 - `GET /v1/api/torrents/requestdl` — gera link de download direto
 
-### TMDB API (PT-BR)
+#### TMDB API (PT-BR)
 - `GET /search/movie` e `/search/tv` — busca por título
 - `GET /movie/{id}` e `/tv/{id}` — metadados completos
 - `GET /tv/{id}/season/{n}` — episódios de temporada
 
 ---
 
-## ⚙️ Como Funciona
+### ⚙️ Como Funciona
 
 ```
 Stremio solicita catálogo
@@ -139,7 +146,7 @@ Streams aparecem no player do Stremio para reprodução
 
 ---
 
-## 🐛 Solução de Problemas
+### 🐛 Solução de Problemas
 
 **Catálogo vazio:**
 - Verifique se as chaves de API estão corretas
@@ -152,10 +159,173 @@ Streams aparecem no player do Stremio para reprodução
 
 **Streams não aparecem:**
 - Os links do TorBox expiram; reabra o título para gerar novos
-- Verifique se o arquivo é um formato de vídeo suportado
+- Verifique se o arquivo é um formato de vídeo suportado (`.mkv`, `.mp4`, `.avi`, `.mov`, `.m4v`, `.ts`, `.wmv`, `.webm`)
 
 ---
 
-## 📄 Licença
+---
+
+## English
+
+A Stremio addon that displays your personal **TorBox** catalog (torrents and usenet) with metadata fetched from TMDB.
+
+### ✨ Features
+
+- 📂 **Movies & Series Catalog** — displays all content downloaded on TorBox
+- 🌐 **TMDB Metadata** — title, synopsis, poster, and backdrop
+- 📅 **Sorting** by date added, release date, or title
+- 🔍 **Search** within your catalog
+- ▶️ **Direct Playback** — clicking a title shows all available versions from TorBox ready to stream in Stremio's player
+- ⚡ Supports both **Torrents and Usenet** from TorBox
+- 💾 Smart caching to avoid hammering the APIs
+
+---
+
+### 🚀 Quick Deploy
+
+#### Option 1 — Vercel (recommended, free)
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USERNAME/torbox-stremio-addon)
+
+1. Fork or clone this repository on GitHub
+2. Go to [vercel.com](https://vercel.com) and import the repository
+3. Click **Deploy** (no environment variables needed — API keys are configured by the user inside Stremio)
+
+**Addon URL:** `https://your-project.vercel.app`
+
+---
+
+#### Option 2 — Render (free)
+
+1. Fork this repository on GitHub
+2. Go to [render.com](https://render.com) → New → Web Service
+3. Connect the repository
+4. Render auto-detects `render.yaml`
+5. Click **Create Web Service**
+
+**Addon URL:** `https://your-project.onrender.com`
+
+> ⚠️ On Render's free tier, the service sleeps after inactivity. The first request after sleep may take ~30s to respond.
+
+---
+
+### 🔧 Stremio Configuration
+
+After deploying, install the addon in Stremio:
+
+1. Open Stremio → **Settings** → **Addons**
+2. Paste the addon URL with `/configure` at the end:
+   ```
+   https://your-project.vercel.app/configure
+   ```
+3. On the configuration page, fill in:
+   - **TorBox API Key** — get it at [torbox.app/settings/api](https://torbox.app/settings/api)
+   - **TMDB API Key (v3)** — get it at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
+   - **Sort by** — choose between: Date Added, Release Date, Title
+4. Click **Install**
+
+Or install directly via URL:
+```
+stremio://your-project.vercel.app/manifest.json
+```
+
+---
+
+### 🛠️ Local Development
+
+```bash
+# Install dependencies
+npm install
+
+# Run locally (port 7860)
+npm start
+
+# Or with hot-reload
+npm run dev
+```
+
+Open `http://localhost:7860` to see the manifest.  
+To configure locally, go to: `http://localhost:7860/configure`
+
+> Requires **Node.js >= 18**.
+
+---
+
+### 📁 Project Structure
+
+```
+torbox-stremio-addon/
+├── Index.js          # Local entry point (starts server on port 7860)
+├── app.js            # Express setup + Stremio addon routes
+├── api/
+│   └── server.js     # Serverless entry point (Vercel)
+├── src/
+│   ├── torbox.js     # TorBox API integration
+│   ├── tmdb.js       # TMDB API integration
+│   ├── builder.js    # Builds catalog, meta, and stream responses
+│   └── parser.js     # Smart filename parser (title, year, season/episode)
+├── configure.html    # Addon configuration page
+├── vercel.json       # Vercel deployment config
+└── package.json
+```
+
+---
+
+### 🔑 APIs Used
+
+#### TorBox API
+- `GET /v1/api/torrents/mylist` — lists all torrents
+- `GET /v1/api/usenet/mylist` — lists all usenet downloads
+- `GET /v1/api/torrents/requestdl` — generates a direct download link
+
+#### TMDB API
+- `GET /search/movie` and `/search/tv` — search by title
+- `GET /movie/{id}` and `/tv/{id}` — full metadata
+- `GET /tv/{id}/season/{n}` — season episodes
+
+---
+
+### ⚙️ How It Works
+
+```
+Stremio requests catalog
+       ↓
+TorBox API → fetches completed downloads
+       ↓
+Parser → extracts title, year, season/episode from filename
+       ↓
+TMDB API → fetches metadata (poster, synopsis, etc.)
+       ↓
+Organized catalog is returned to Stremio
+
+User clicks a title
+       ↓
+TorBox API → lists files inside the download
+       ↓
+TorBox API → generates direct link for each video file
+       ↓
+Streams appear in Stremio's player for playback
+```
+
+---
+
+### 🐛 Troubleshooting
+
+**Empty catalog:**
+- Make sure your API keys are correct
+- Confirm that there are **completed** downloads in TorBox
+- Check server logs for errors
+
+**Wrong posters:**
+- The parser tries to match filenames against TMDB; heavily modified names may fail to match
+- Results are cached for 24h — restart the server if you need to reprocess
+
+**Streams not showing:**
+- TorBox links expire; reopen the title to generate new ones
+- Make sure the file is a supported video format (`.mkv`, `.mp4`, `.avi`, `.mov`, `.m4v`, `.ts`, `.wmv`, `.webm`)
+
+---
+
+### 📄 License
 
 MIT
