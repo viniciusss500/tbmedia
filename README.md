@@ -53,9 +53,9 @@ Addon para o Stremio que exibe seu catálogo pessoal do **TorBox** (torrents e u
 Após o deploy, instale o addon no Stremio:
 
 1. Abra o Stremio → **Configurações** → **Addons**
-2. Cole a URL do addon com `/configure` no final:
+2. Cole a URL do addon:
    ```
-   https://seu-projeto.vercel.app/configure
+   https://seu-projeto.vercel.app/xyz/manifest.json
    ```
 3. Na tela de configuração, preencha:
    - **TorBox API Key** — obtenha em [torbox.app/settings/api](https://torbox.app/settings/api)
