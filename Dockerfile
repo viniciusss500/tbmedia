@@ -1,12 +1,23 @@
+# Base leve
 FROM node:20-alpine
 
+# Diretório da app
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --production
+# Copia só dependências primeiro (melhor cache)
+COPY package*.json ./
 
+# Instala apenas produção
+RUN npm ci --omit=dev
+
+# Copia resto do projeto
 COPY . .
 
+# Porta do app
 EXPOSE 7860
 
-CMD ["node", "Index.js"]
+# Variável padrão
+ENV PORT=7860
+
+# Start correto
+CMD ["npm", "start"]
