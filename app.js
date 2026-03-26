@@ -74,8 +74,8 @@ setInterval(() => {
 function getBaseManifest(baseUrl) {
   return {
     id: 'community.torbox.catalog',
-    version: '1.3.0',
-    name: 'TB Files TMDB',
+    version: '1.4.0',
+    name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
     logo: 'https://github.com/vinip1250-art/tbmedia/blob/main/public/tb-files-tmdb-icon.svg',
     resources: ['catalog', 'meta', 'stream'],
@@ -91,7 +91,7 @@ function getConfiguredManifest() {
   return {
     id: 'community.torbox.catalog',
     version: '1.3.0',
-    name: 'TB Files TMDB',
+    name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
     logo: 'https://github.com/vinip1250-art/tbmedia/blob/main/public/tb-files-tmdb-icon.svg',
     resources: [
