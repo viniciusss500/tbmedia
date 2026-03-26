@@ -77,7 +77,7 @@ function getBaseManifest(baseUrl) {
     version: '1.4.0',
     name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
-    logo: 'https://github.com/vinip1250-art/tbmedia/blob/main/public/tb-files-tmdb-icon.svg',
+    logo: 'https://tbmedia.vercel.app/file_00000000eb3871fdbe0126338c869eba.png',
     resources: ['catalog', 'meta', 'stream'],
     types: ['movie', 'series'],
     idPrefixes: ['torbox:'],
@@ -93,7 +93,7 @@ function getConfiguredManifest() {
     version: '1.3.0',
     name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
-    logo: 'https://github.com/vinip1250-art/tbmedia/blob/main/public/tb-files-tmdb-icon.svg',
+    logo: 'https://tbmedia.vercel.app/file_00000000eb3871fdbe0126338c869eba.png',
     resources: [
       'catalog',
       'meta',
