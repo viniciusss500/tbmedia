@@ -1,26 +1,33 @@
-<!-- tb-files-tmdb-icon.svg - minimal folder + bolt -->
+<!-- tb-files-tmdb-icon-yellow-green.svg - minimal folder (yellow) + bolt (green) -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="TB Files TMDB icon">
   <defs>
-    <linearGradient id="g1" x1="0" x2="1" y1="0" y2="1">
+    <linearGradient id="bgGrad" x1="0" x2="1" y1="0" y2="1">
       <stop offset="0" stop-color="#0B2545"/>
       <stop offset="1" stop-color="#071833"/>
     </linearGradient>
-    <linearGradient id="g2" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#FFD166"/>
-      <stop offset="1" stop-color="#FFB84D"/>
+    <linearGradient id="folderGrad" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#FFD54A"/>
+      <stop offset="1" stop-color="#FFC107"/>
+    </linearGradient>
+    <linearGradient id="boltGrad" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#4CAF50"/>
+      <stop offset="1" stop-color="#2E7D32"/>
     </linearGradient>
   </defs>
 
-  <!-- background circle for clear silhouette -->
-  <circle cx="512" cy="512" r="512" fill="url(#g1)"/>
+  <!-- background circle for silhouette -->
+  <circle cx="512" cy="512" r="512" fill="url(#bgGrad)"/>
 
-  <!-- folder shape -->
-  <g transform="translate(160,260) scale(0.7)">
-    <path d="M40 160 L220 160 L260 200 L760 200 L760 520 L40 520 Z" fill="#FFFFFF" opacity="0.10" />
-    <rect x="60" y="220" width="640" height="300" rx="12" fill="#FFFFFF" opacity="0.06"/>
+  <!-- large folder -->
+  <g transform="translate(120,240) scale(0.76)">
+    <path d="M40 160 L260 160 L320 220 L760 220 L760 560 L40 560 Z" fill="url(#folderGrad)" stroke="#E6A800" stroke-width="6" stroke-linejoin="round"/>
+    <rect x="60" y="240" width="640" height="300" rx="18" fill="#FFF8E1" opacity="0.06"/>
+    <!-- subtle inner edge -->
+    <path d="M80 260 L720 260" stroke="#E6A800" stroke-width="2" opacity="0.12"/>
   </g>
 
-  <!-- bolt -->
-  <path d="M560 220 L420 520 L520 520 L440 780 L760 420 L620 420 L700 220 Z"
-        fill="url(#g2)" stroke="#FF9E2A" stroke-width="6" stroke-linejoin="round" transform="translate(-40,0) scale(0.9)"/>
+  <!-- green bolt overlapping folder -->
+  <path d="M560 200 L420 520 L520 520 L440 780 L760 420 L620 420 L700 200 Z"
+        fill="url(#boltGrad)" stroke="#1B5E20" stroke-width="6" stroke-linejoin="round" transform="translate(-40,0) scale(0.9)"/>
+
 </svg>
