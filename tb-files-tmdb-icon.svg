@@ -1,0 +1,26 @@
+<!-- tb-files-tmdb-icon.svg - minimal folder + bolt -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="TB Files TMDB icon">
+  <defs>
+    <linearGradient id="g1" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0B2545"/>
+      <stop offset="1" stop-color="#071833"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#FFD166"/>
+      <stop offset="1" stop-color="#FFB84D"/>
+    </linearGradient>
+  </defs>
+
+  <!-- background circle for clear silhouette -->
+  <circle cx="512" cy="512" r="512" fill="url(#g1)"/>
+
+  <!-- folder shape -->
+  <g transform="translate(160,260) scale(0.7)">
+    <path d="M40 160 L220 160 L260 200 L760 200 L760 520 L40 520 Z" fill="#FFFFFF" opacity="0.10" />
+    <rect x="60" y="220" width="640" height="300" rx="12" fill="#FFFFFF" opacity="0.06"/>
+  </g>
+
+  <!-- bolt -->
+  <path d="M560 220 L420 520 L520 520 L440 780 L760 420 L620 420 L700 220 Z"
+        fill="url(#g2)" stroke="#FF9E2A" stroke-width="6" stroke-linejoin="round" transform="translate(-40,0) scale(0.9)"/>
+</svg>
