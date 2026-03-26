@@ -113,8 +113,9 @@ function getConfiguredManifest() {
 // ─── STATIC ───────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => res.redirect('/configure'));
 app.get('/configure', (req, res) => res.sendFile(path.join(ROOT_DIR, 'configure.html')));
+// Redireciona para configuração (requisito do stremio-addons.net)
 app.get('/manifest.json', (req, res) => {
-  res.json(getBaseManifest(`${req.protocol}://${req.get('host')}`));
+  res.redirect('/configure');
 });
 
 // ─── MANIFEST ─────────────────────────────────────────────────────────────────
