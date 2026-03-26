@@ -90,35 +90,56 @@ function getBaseManifest(baseUrl) {
 function getConfiguredManifest() {
   return {
     id: 'community.torbox.catalog',
-    version: '1.3.0',
+    version: '1.4.0',
     name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
     logo: 'https://tbmedia.vercel.app/file_00000000eb3871fdbe0126338c869eba.png',
     resources: [
       'catalog',
       'meta',
-      { name: 'stream', types: ['movie', 'series'], idPrefixes: ['torbox:', 'tt'] },
+      { 
+        name: 'stream', 
+        types: ['movie', 'series'], 
+        idPrefixes: ['torbox:', 'tt'] 
+      },
     ],
     types: ['movie', 'series'],
     idPrefixes: ['torbox:'],
     catalogs: [
-      { id: 'torbox-movies',  type: 'movie',  name: '🎬 TorBox Filmes', extra: [{ name: 'skip' }, { name: 'search' }] },
-      { id: 'torbox-series',  type: 'series', name: '📺 TorBox Series', extra: [{ name: 'skip' }, { name: 'search' }] },
-      { id: 'torbox-anime',   type: 'series', name: '🍥 TorBox Animes',  extra: [{ name: 'skip' }, { name: 'search' }] },
+      { 
+        id: 'torbox-movies',  
+        type: 'movie',  
+        name: '🎬 TorBox Filmes', 
+        extra: [{ name: 'skip' }, { name: 'search' }] 
+      },
+      { 
+        id: 'torbox-series',  
+        type: 'series', 
+        name: '📺 TorBox Series', 
+        extra: [{ name: 'skip' }, { name: 'search' }] 
+      },
+      { 
+        id: 'torbox-anime',   
+        type: 'series', 
+        name: '🍥 TorBox Animes',  
+        extra: [{ name: 'skip' }, { name: 'search' }] 
+      },
     ],
     behaviorHints: { configurable: true },
   };
 }
 
 // ─── STATIC ───────────────────────────────────────────────────────────────────
-app.get('/', (req, res) => res.redirect('/configure'));
+app.get('/', (req, res) => res.redirect('/manifest.json'));
 app.get('/configure', (req, res) => res.sendFile(path.join(ROOT_DIR, 'configure.html')));
-// Redireciona para configuração (requisito do stremio-addons.net)
+
+// ✅ CORREÇÃO PRINCIPAL: manifest.json na raiz (exigência do stremio-addons.net)
 app.get('/manifest.json', (req, res) => {
-  res.redirect('/configure');
+  // Retorna manifest base com configuração obrigatória
+  res.json(getBaseManifest(req.protocol + '://' + req.get('host')));
 });
 
-// ─── MANIFEST ─────────────────────────────────────────────────────────────────
+// ─── MANIFEST CONFIGURADO ─────────────────────────────────────────────────────
 app.get('/:token/manifest.json', (req, res) => {
   if (!decodeConfig(req.params.token)) return res.status(400).json({ error: 'Invalid token' });
   res.json(getConfiguredManifest());
