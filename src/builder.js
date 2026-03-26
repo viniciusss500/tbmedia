@@ -34,7 +34,7 @@ loadPersistentCache();
 setInterval(savePersistentCache, 60_000);
 
 // ─── ÍNDICE ───────────────────────────────────────────────────────────────────
-const tmdbIndex = new Map(); // `series:12345` → [{item, season, episode}]
+const tmdbindex = new Map(); // `series:12345` → [{item, season, episode}]
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 // Decide se um resultado do TMDB é anime.
@@ -155,10 +155,10 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
     const indexKey = `${meta.type}:${meta.tmdbId}`;
     const entry    = { item: meta.torboxItem, season: meta.season, episode: meta.episode };
 
-    if (!tmdbIndex.has(indexKey)) {
-      tmdbIndex.set(indexKey, [entry]);
+    if (!tmdbindex.has(indexKey)) {
+      tmdbindex.set(indexKey, [entry]);
     } else {
-      const existing = tmdbIndex.get(indexKey);
+      const existing = tmdbindex.get(indexKey);
       if (!existing.some(e => e.item.id === entry.item.id)) existing.push(entry);
     }
 
@@ -260,7 +260,7 @@ async function buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey) {
 // ─── STREAMS ──────────────────────────────────────────────────────────────────
 async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, episode, lang) {
   const indexKey = `${type === 'anime' ? 'series' : type}:${tmdbId}`;
-  let entries    = tmdbIndex.get(indexKey);
+  let entries    = tmdbindex.get(indexKey);
 
   if (!entries || entries.length === 0) {
     console.log(`[Stream] Índice vazio para ${indexKey}, reconstruindo...`);
@@ -304,7 +304,7 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
       }
     }
 
-    if (entries.length > 0) tmdbIndex.set(indexKey, entries);
+    if (entries.length > 0) tmdbindex.set(indexKey, entries);
   }
 
   if (!entries || entries.length === 0) return [];
