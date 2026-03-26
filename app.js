@@ -102,9 +102,9 @@ function getConfiguredManifest() {
     types: ['movie', 'series'],
     idPrefixes: ['torbox:'],
     catalogs: [
-      { id: 'torbox-movies',  type: 'movie',  name: '🎬 TorBox - Filmes', extra: [{ name: 'skip' }, { name: 'search' }] },
-      { id: 'torbox-series',  type: 'series', name: '📺 TorBox - Séries', extra: [{ name: 'skip' }, { name: 'search' }] },
-      { id: 'torbox-anime',   type: 'series', name: '🍥 TorBox - Anime',  extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'torbox-movies',  type: 'movie',  name: '🎬 TorBox', extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'torbox-series',  type: 'series', name: '📺 TorBox', extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'torbox-anime',   type: 'series', name: '🍥 TorBox',  extra: [{ name: 'skip' }, { name: 'search' }] },
     ],
     behaviorHints: { configurable: true },
   };
