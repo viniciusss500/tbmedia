@@ -75,9 +75,9 @@ function getBaseManifest(baseUrl) {
   return {
     id: 'community.torbox.catalog',
     version: '1.3.0',
-    name: 'TBmedia',
+    name: 'TB Files TMDB',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
-    logo: 'https://torbox.app/favicon.ico',
+    logo: 'https://github.com/vinip1250-art/tbmedia/blob/main/public/tb-files-tmdb-icon.svg',
     resources: ['catalog', 'meta', 'stream'],
     types: ['movie', 'series'],
     idPrefixes: ['torbox:'],
@@ -91,9 +91,9 @@ function getConfiguredManifest() {
   return {
     id: 'community.torbox.catalog',
     version: '1.3.0',
-    name: 'TorBox Catalog',
+    name: 'TB Files TMDB',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
-    logo: 'https://torbox.app/favicon.ico',
+    logo: 'https://github.com/vinip1250-art/tbmedia/blob/main/public/tb-files-tmdb-icon.svg',
     resources: [
       'catalog',
       'meta',
