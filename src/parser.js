@@ -131,8 +131,8 @@ function guessMediaInfo(raw) {
   let year = null;
   if (ym) { year = parseInt(ym[1], 10); if (ym.index < techCut) techCut = ym.index; }
 
-  const cutIndex = Math.min(serieCut, techCut);
-  let title = norm.substring(0, cutIndex);
+  const cutindex = Math.min(serieCut, techCut);
+  let title = norm.substring(0, cutindex);
 
   title = title.replace(/\s*\([^)]*\)/g, '');
   title = title.replace(/\s*\[[^\]]*\]/g, '');
