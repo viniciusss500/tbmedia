@@ -86,7 +86,12 @@ function getBaseManifest(baseUrl) {
     configureUrl: `${baseUrl}/configure`,
   };
 }
-
+{
+  "stremioAddonsConfig": {
+    "issuer": "https://stremio-addons.net",
+    "signature": "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..wuS2Idc3UAATsil5cgTVBw.YXJH_xCqef9srmpEvQnoCwnA62U2_CPGTB2UfL89gpqVTU928HWIhrHgrfXiQ6Qu_GYfKBjU1dKqKXp2ZGJb0_SoJ0pQK9lvhg23pN2JRXNhBbZirRxumbi3dFUpa3An.fn0tzw5B94KrkB5mXUanAw"
+  }
+}
 function getConfiguredManifest() {
   return {
     id: 'community.torbox.catalog',
