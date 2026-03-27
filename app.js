@@ -84,9 +84,14 @@ function getBaseManifest(baseUrl) {
     catalogs: [],
     behaviorHints: { configurable: true, configurationRequired: true },
     configureUrl: `${baseUrl}/configure`,
+    // ✅ Verificação stremio-addons.net
+    stremioAddonsConfig: {
+      issuer: "https://stremio-addons.net",
+      signature: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..wuS2Idc3UAATsil5cgTVBw.YXJH_xCqef9srmpEvQnoCwnA62U2_CPGTB2UfL89gpqVTU928HWIhrHgrfXiQ6Qu_GYfKBjU1dKqKXp2ZGJb0_SoJ0pQK9lvhg23pN2JRXNhBbZirRxumbi3dFUpa3An.fn0tzw5B94KrkB5mXUanAw"
+    },
   };
 }
-    
+
 function getConfiguredManifest() {
   return {
     id: 'community.torbox.catalog',
@@ -97,35 +102,21 @@ function getConfiguredManifest() {
     resources: [
       'catalog',
       'meta',
-      { 
-        name: 'stream', 
-        types: ['movie', 'series'], 
-        idPrefixes: ['torbox:', 'tt'] 
-      },
+      { name: 'stream', types: ['movie', 'series'], idPrefixes: ['torbox:', 'tt'] },
     ],
     types: ['movie', 'series'],
     idPrefixes: ['torbox:'],
     catalogs: [
-      { 
-        id: 'torbox-movies',  
-        type: 'movie',  
-        name: '🎬 TorBox Filmes', 
-        extra: [{ name: 'skip' }, { name: 'search' }] 
-      },
-      { 
-        id: 'torbox-series',  
-        type: 'series', 
-        name: '📺 TorBox Series', 
-        extra: [{ name: 'skip' }, { name: 'search' }] 
-      },
-      { 
-        id: 'torbox-anime',   
-        type: 'series', 
-        name: '🍥 TorBox Animes',  
-        extra: [{ name: 'skip' }, { name: 'search' }] 
-      },
+      { id: 'torbox-movies',  type: 'movie',  name: '🎬 TorBox Filmes', extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'torbox-series',  type: 'series', name: '📺 TorBox Series', extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'torbox-anime',   type: 'series', name: '🍥 TorBox Animes',  extra: [{ name: 'skip' }, { name: 'search' }] },
     ],
     behaviorHints: { configurable: true },
+    // ✅ Verificação stremio-addons.net
+    stremioAddonsConfig: {
+      issuer: "https://stremio-addons.net",
+      signature: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..wuS2Idc3UAATsil5cgTVBw.YXJH_xCqef9srmpEvQnoCwnA62U2_CPGTB2UfL89gpqVTU928HWIhrHgrfXiQ6Qu_GYfKBjU1dKqKXp2ZGJb0_SoJ0pQK9lvhg23pN2JRXNhBbZirRxumbi3dFUpa3An.fn0tzw5B94KrkB5mXUanAw"
+    },
   };
 }
 
