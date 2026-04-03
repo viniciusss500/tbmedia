@@ -9,6 +9,7 @@ services:
 
     environment:
       - PORT=7860
+      - UPSTASH_REDIS_URL=
 
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:7860/"]
