@@ -1,23 +1,13 @@
-# Base leve
-FROM node:20-alpine
+FROM node:24-alpine
 
-# Diretório da app
 WORKDIR /app
 
-# Copia só dependências primeiro (melhor cache)
 COPY package*.json ./
+RUN npm ci --omit=dev
 
-# Instala apenas produção
-RUN npm install --production
-
-# Copia resto do projeto
 COPY . .
 
-# Porta do app
 EXPOSE 7860
-
-# Variável padrão
 ENV PORT=7860
 
-# Start correto
 CMD ["npm", "start"]
