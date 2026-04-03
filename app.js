@@ -4,6 +4,7 @@ const NodeCache = require('node-cache');
 const { getTorBoxDownloads } = require('./src/torbox');
 const { buildCatalog, buildMeta, buildStreams } = require('./src/builder');
 const { imdbToTmdb } = require('./src/tmdb');
+const cache = require('./src/cache');
 
 const ROOT_DIR = path.resolve(__dirname);
 
