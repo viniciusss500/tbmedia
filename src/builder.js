@@ -1,52 +1,149 @@
-// ─── STREAMS (OTIMIZADO) ──────────────────────────────────────────────────────
+const fs = require('fs');
 const NodeCache = require('node-cache');
 
-const streamCache = new NodeCache({ stdTTL: 3600 }); // cache de links
-const filesCache  = new NodeCache({ stdTTL: 3600 }); // cache de arquivos
+const {
+  getTorBoxDownloads,
+  getTorBoxStreamLink,
+  getTorBoxFiles,
+  isVideoFile
+} = require('./torbox');
 
-async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, episode, lang) {
-  const indexKey = `${type === 'anime' ? 'series' : type}:${tmdbId}`;
-  let entries    = tmdbindex.get(indexKey);
+const { searchMetadata, getMetadata } = require('./tmdb');
+const { guessMediaInfo } = require('./parser');
 
-  if (!entries || entries.length === 0) {
-    console.log(`[Stream] ❌ Sem índice para ${indexKey} → abortando`);
-    return []; // 🚫 NÃO reconstruir downloads (economia massiva)
+// ─── CACHE ────────────────────────────────────────────────────────────────────
+const CACHE_FILE = '/tmp/torbox-tmdb-cache.json';
+
+const matchCache  = new NodeCache({ stdTTL: 86400 });
+const streamCache = new NodeCache({ stdTTL: 3600 });
+
+// ─── LOAD/SAVE CACHE ──────────────────────────────────────────────────────────
+function loadPersistentCache() {
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+      for (const [k, v] of Object.entries(data)) {
+        matchCache.set(k, v);
+      }
+      console.log(`[Cache] Loaded ${Object.keys(data).length}`);
+    }
+  } catch {}
+}
+
+function savePersistentCache() {
+  try {
+    const data = {};
+    for (const k of matchCache.keys()) {
+      const v = matchCache.get(k);
+      if (v !== undefined) data[k] = v;
+    }
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(data));
+  } catch {}
+}
+
+loadPersistentCache();
+setInterval(savePersistentCache, 60000);
+
+// ─── INDEX ────────────────────────────────────────────────────────────────────
+const tmdbindex = new Map();
+
+// ─── MATCH ────────────────────────────────────────────────────────────────────
+async function matchItem(item, tmdbApiKey, type, lang) {
+  const name = item.name || item.filename || '';
+  const cacheKey = `match:${type}:${lang}:${name}`;
+
+  const cached = matchCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const info = guessMediaInfo(name);
+  if (!info) {
+    matchCache.set(cacheKey, null);
+    return null;
   }
 
-  // ── Filtrar episódios ───────────────────────────────────────────────────────
-  let filtered = entries;
+  try {
+    const tmdbType = type === 'movie' ? 'movie' : 'series';
+    const result = await searchMetadata(tmdbApiKey, info.title, tmdbType, info.year, lang);
 
-  if (type === 'series' || type === 'anime') {
-    filtered = entries.filter(({ season: s, episode: e }) => {
-      if (season && s && String(s) !== String(season)) return false;
-      if (episode && e && String(e) !== String(episode)) return false;
-      return true;
+    if (!result) {
+      matchCache.set(cacheKey, null);
+      return null;
+    }
+
+    const meta = {
+      id: `torbox:${type}:${result.id}`,
+      type,
+      name: result.title || result.name,
+      poster: result.poster_path ? `https://image.tmdb.org/t/p/w500${result.poster_path}` : null,
+      released: result.release_date || result.first_air_date,
+      tmdbId: result.id,
+      torboxItem: item,
+      season: info.season,
+      episode: info.episode
+    };
+
+    matchCache.set(cacheKey, meta);
+    return meta;
+
+  } catch {
+    matchCache.set(cacheKey, null);
+    return null;
+  }
+}
+
+// ─── CATALOG ──────────────────────────────────────────────────────────────────
+async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang) {
+  const skip = parseInt(extra?.skip) || 0;
+  const PAGE_SIZE = 50;
+
+  const metas = [];
+
+  for (const item of downloads) {
+    const meta = await matchItem(item, tmdbApiKey, type, lang);
+    if (meta) metas.push(meta);
+  }
+
+  // indexar
+  for (const meta of metas) {
+    const key = `${meta.type}:${meta.tmdbId}`;
+    if (!tmdbindex.has(key)) tmdbindex.set(key, []);
+    tmdbindex.get(key).push({
+      item: meta.torboxItem,
+      season: meta.season,
+      episode: meta.episode
     });
   }
 
-  if (!filtered.length) return [];
+  return metas.slice(skip, skip + PAGE_SIZE);
+}
 
-  console.log(`[Stream] ${filtered.length} entries após filtro`);
+// ─── META ─────────────────────────────────────────────────────────────────────
+async function buildMeta(tmdbId, type, tmdbApiKey, lang) {
+  const tmdbType = type === 'series' ? 'series' : 'movie';
+  return await getMetadata(tmdbApiKey, tmdbId, tmdbType, lang);
+}
 
-  // ── Coletar streams (LIMITADO + CACHE) ──────────────────────────────────────
-  const rawStreams = [];
+// ─── STREAMS (OTIMIZADO) ──────────────────────────────────────────────────────
+async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, episode, lang) {
+  const key = `${type}:${tmdbId}`;
+  const entries = tmdbindex.get(key);
+
+  if (!entries || !entries.length) {
+    console.log('[Stream] ❌ Sem índice → evitando rebuild');
+    return [];
+  }
+
   const MAX_STREAMS = 5;
+  const streams = [];
 
-  for (const { item } of filtered) {
-    if (rawStreams.length >= MAX_STREAMS) break;
+  for (const { item } of entries) {
+    if (streams.length >= MAX_STREAMS) break;
 
-    const filesKey = `files:${item.id}`;
-    let files = filesCache.get(filesKey);
+    const files = await getTorBoxFiles(torboxApiKey, item.source, item.id);
+    const videos = files.filter(f => isVideoFile(f.name || f.short_name));
 
-    if (!files) {
-      files = await getTorBoxFiles(torboxApiKey, item.source, item.id);
-      filesCache.set(filesKey, files);
-    }
-
-    const videoFiles = files.filter(f => isVideoFile(f.name || f.short_name));
-
-    for (const file of videoFiles.slice(0, 3)) { // limita por item
-      if (rawStreams.length >= MAX_STREAMS) break;
+    for (const file of videos.slice(0, 2)) {
+      if (streams.length >= MAX_STREAMS) break;
 
       const cacheKey = `stream:${item.id}:${file.id}`;
       let url = streamCache.get(cacheKey);
@@ -58,32 +155,20 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
 
       if (!url) continue;
 
-      rawStreams.push({
+      streams.push({
         url,
-        fname: file.name || file.short_name || item.name,
-        size: file.size || 0,
-        source: item.source
+        name: '⚡ TorBox',
+        behaviorHints: { notWebReady: false }
       });
     }
   }
 
-  if (!rawStreams.length) return [];
-
-  // ── Ordenação ───────────────────────────────────────────────────────────────
-  const langCode = (lang || 'pt-BR').split('-')[0].toLowerCase();
-
-  rawStreams.sort((a, b) => {
-    const dl = langScore(b.fname, langCode) - langScore(a.fname, langCode);
-    if (dl !== 0) return dl;
-    const dq = qualityScore(b.fname) - qualityScore(a.fname);
-    if (dq !== 0) return dq;
-    return b.size - a.size;
-  });
-
-  return rawStreams.map(({ url, fname, size, source }) => ({
-    url,
-    name: formatStreamName(fname),
-    description: formatStreamDesc(fname, size, source),
-    behaviorHints: { notWebReady: false },
-  }));
+  return streams;
 }
+
+// ─── EXPORTS ──────────────────────────────────────────────────────────────────
+module.exports = {
+  buildCatalog,
+  buildMeta,
+  buildStreams
+};
