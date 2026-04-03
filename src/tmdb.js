@@ -24,11 +24,6 @@ async function imdbToTmdb(apiKey, imdbId) {
   } catch { return null; }
 }
 
-/**
- * Busca metadata no TMDB.
- * Retorna resultado com `isJapaneseAnimation` — usado pelo builder para
- * separar anime de séries de forma confiável, independente do nome do arquivo.
- */
 async function searchMetadata(apiKey, query, type, year, lang = 'pt-BR') {
   const endpoint = type === 'movie' ? '/search/movie' : '/search/tv';
   const auth   = tmdbAuth(apiKey);
@@ -40,7 +35,6 @@ async function searchMetadata(apiKey, query, type, year, lang = 'pt-BR') {
   const result = res.data?.results?.[0];
   if (!result) return null;
 
-  // Detectar anime de forma confiável: idioma original japonês + gênero Animation (id=16)
   result.isJapaneseAnimation =
     result.original_language === 'ja' &&
     (result.genre_ids || []).includes(16);
@@ -68,7 +62,6 @@ async function fetchSeasonVideos(auth, tmdbId, season, lang, fallbackPoster) {
       rating:    ep.vote_average?.toFixed(1),
     }));
   } catch {
-    // Fallback: só o card da temporada
     return [{
       id:      `torbox:series:${tmdbId}:${season.season_number}:1`,
       title:   season.name || `Temporada ${season.season_number}`,
@@ -130,7 +123,6 @@ async function getMetadata(apiKey, tmdbId, type, lang = 'pt-BR') {
       links: imdbId ? [{ name: 'IMDB', category: 'imdb', url: `https://www.imdb.com/title/${imdbId}` }] : [],
     };
   } else {
-    // Buscar episódios de cada temporada em paralelo
     const rawSeasons = (detail.seasons || []).filter(s => s.season_number > 0);
     const episodeLists = await Promise.all(
       rawSeasons.map(s => fetchSeasonVideos(auth, tmdbId, s, lang, poster))

@@ -1,6 +1,5 @@
 const Redis = require('ioredis');
 
-// ─── CONFIGURAÇÃO DO REDIS ────────────────────────────────────────────────────
 let redis = null;
 let isConnected = false;
 
@@ -39,13 +38,6 @@ function getRedisClient() {
   return redis;
 }
 
-// ─── OPERAÇÕES DE CACHE ───────────────────────────────────────────────────────
-
-/**
- * Busca um valor no cache
- * @param {string} key - Chave do cache
- * @returns {Promise<any|null>} - Valor deserializado ou null
- */
 async function get(key) {
   const client = getRedisClient();
   if (!client) {
@@ -66,13 +58,6 @@ async function get(key) {
   }
 }
 
-/**
- * Armazena um valor no cache com TTL
- * @param {string} key - Chave do cache
- * @param {any} value - Valor a ser armazenado (será serializado para JSON)
- * @param {number} ttl - Time to live em segundos (padrão: 1 hora)
- * @returns {Promise<boolean>} - true se armazenado com sucesso
- */
 async function set(key, value, ttl = 3600) {
   const client = getRedisClient();
   if (!client) {
@@ -91,11 +76,6 @@ async function set(key, value, ttl = 3600) {
   }
 }
 
-/**
- * Remove um valor do cache
- * @param {string} key - Chave do cache
- * @returns {Promise<boolean>} - true se removido com sucesso
- */
 async function del(key) {
   const client = getRedisClient();
   if (!client) return false;
@@ -110,11 +90,6 @@ async function del(key) {
   }
 }
 
-/**
- * Remove múltiplas chaves que correspondem a um padrão
- * @param {string} pattern - Padrão de busca (ex: "cat:*")
- * @returns {Promise<number>} - Número de chaves removidas
- */
 async function delPattern(pattern) {
   const client = getRedisClient();
   if (!client) return 0;
@@ -132,11 +107,6 @@ async function delPattern(pattern) {
   }
 }
 
-/**
- * Verifica se uma chave existe no cache
- * @param {string} key - Chave do cache
- * @returns {Promise<boolean>} - true se existe
- */
 async function exists(key) {
   const client = getRedisClient();
   if (!client) return false;
@@ -150,12 +120,6 @@ async function exists(key) {
   }
 }
 
-/**
- * Define TTL para uma chave existente
- * @param {string} key - Chave do cache
- * @param {number} ttl - Time to live em segundos
- * @returns {Promise<boolean>} - true se TTL foi definido
- */
 async function expire(key, ttl) {
   const client = getRedisClient();
   if (!client) return false;
@@ -169,10 +133,6 @@ async function expire(key, ttl) {
   }
 }
 
-/**
- * Obtém estatísticas do cache
- * @returns {Promise<Object>} - Estatísticas do Redis
- */
 async function getStats() {
   const client = getRedisClient();
   if (!client) return { connected: false };
@@ -196,19 +156,9 @@ async function getStats() {
   }
 }
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-/**
- * Gera chave de cache formatada
- * @param {string} prefix - Prefixo (ex: 'cat', 'meta', 'stream')
- * @param {Array<string>} parts - Partes da chave
- * @returns {string} - Chave formatada
- */
 function makeKey(prefix, ...parts) {
   return `${prefix}:${parts.filter(Boolean).join(':')}`;
 }
-
-// ─── EXPORTAÇÕES ──────────────────────────────────────────────────────────────
 
 module.exports = {
   get,
@@ -219,5 +169,5 @@ module.exports = {
   expire,
   getStats,
   makeKey,
-  getRedisClient, // Para casos de uso avançado
+  getRedisClient,
 };
