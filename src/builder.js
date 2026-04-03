@@ -4,7 +4,6 @@ const { searchMetadata, getMetadata } = require('./tmdb');
 const { guessMediaInfo } = require('./parser');
 const NodeCache = require('node-cache');
 
-// ─── CACHE PERSISTENTE ────────────────────────────────────────────────────────
 const CACHE_FILE = '/tmp/torbox-tmdb-cache.json';
 const matchCache = new NodeCache({ stdTTL: 86400 });
 
@@ -33,17 +32,12 @@ function savePersistentCache() {
 loadPersistentCache();
 setInterval(savePersistentCache, 60_000);
 
-// ─── ÍNDICE ───────────────────────────────────────────────────────────────────
 const tmdbindex = new Map(); // `series:12345` → [{item, season, episode}]
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
-// Decide se um resultado do TMDB é anime.
-// Usa flag isJapaneseAnimation da searchMetadata OU campo do cache.
 function isTmdbAnime(result) {
   return result && (result.isJapaneseAnimation === true);
 }
 
-// ─── MATCH ITEM ───────────────────────────────────────────────────────────────
 async function matchItem(item, tmdbApiKey, type, lang) {
   const name     = item.name || item.filename || '';
   const tmdbType = type === 'movie' ? 'movie' : 'series';
@@ -71,24 +65,20 @@ async function matchItem(item, tmdbApiKey, type, lang) {
   const info = guessMediaInfo(name);
   if (!info) { matchCache.set(cacheKey, null); return null; }
 
-  // Filtro pelo parser (rápido, sem rede)
   if (type === 'movie'  && (info.isSeries || info.isAnime))  { matchCache.set(cacheKey, null); return null; }
   if (type === 'series' && !info.isSeries)                   { matchCache.set(cacheKey, null); return null; }
   if (type === 'anime'  && !info.isSeries)                   { matchCache.set(cacheKey, null); return null; }
-  // Anime detectado pelo parser → não vai para 'series'
   if (type === 'series' && info.isAnime)                     { matchCache.set(cacheKey, null); return null; }
 
   try {
     const result = await searchMetadata(tmdbApiKey, info.title, tmdbType, info.year, lang);
     if (!result) { matchCache.set(cacheKey, null); return null; }
 
-    // Verificação via TMDB: anime (ja + Animation) não vai para 'series'
     if (type === 'series' && isTmdbAnime(result)) {
       console.log(`[TMDB] "${info.title}" é anime (ja+Animation) — excluído de séries`);
       matchCache.set(cacheKey, null);
       return null;
     }
-    // Verificação via TMDB: 'anime' requer que seja anime (ja+Animation) OU parser detectou
     if (type === 'anime' && !isTmdbAnime(result) && !info.isAnime) {
       matchCache.set(cacheKey, null);
       return null;
@@ -122,13 +112,11 @@ async function matchItem(item, tmdbApiKey, type, lang) {
   }
 }
 
-// ─── BUILD CATALOG ────────────────────────────────────────────────────────────
 async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = 'pt-BR') {
   const skip      = parseInt(extra?.skip) || 0;
   const search    = extra?.search?.toLowerCase();
   const PAGE_SIZE = 50;
 
-  // Filtrar por tipo sem deduplicar — todos os episódios precisam entrar no índice
   const allRelevant = [];
   for (const item of downloads) {
     const name = item.name || item.filename || '';
@@ -150,7 +138,6 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
     results.push(...matched.filter(Boolean));
   }
 
-  // Popula índice com todos os episódios; catálogo exibe um card por show
   const seen = new Map();
   for (const meta of results) {
     const indexKey = `${meta.type}:${meta.tmdbId}`;
@@ -189,9 +176,6 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
     .filter(m => m.poster);
 }
 
-// ─── META ─────────────────────────────────────────────────────────────────────
-// Retorna metadata filtrada: busca downloads do TorBox e faz match via TMDB
-// para filtrar só os episódios disponíveis. Funciona stateless (Vercel).
 async function buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey) {
   const tmdbType = type === 'series' || type === 'anime' ? 'series' : 'movie';
   const meta = await getMetadata(tmdbApiKey, tmdbId, tmdbType, lang);
@@ -202,7 +186,6 @@ async function buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey) {
     const downloads = await getTorBoxDownloads(torboxApiKey);
     const availableEps = new Set();
     let hasFullPack = false;
-    // Cache de títulos já buscados no TMDB nesta request (evita N calls para o mesmo show)
     const titleCache = new Map();
 
     for (const item of downloads) {
@@ -210,7 +193,6 @@ async function buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey) {
       const info = guessMediaInfo(name);
       if (!info || !info.isSeries) continue;
 
-      // 1) matchCache em memória (populado se buildCatalog já rodou na mesma instância)
       let matched = false;
       for (const t of ['anime', 'series']) {
         for (const l of [lang, 'pt-BR', 'en-US']) {
@@ -220,7 +202,6 @@ async function buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey) {
         if (matched) break;
       }
 
-      // 2) Fallback TMDB direto (stateless — Vercel sem cache em memória)
       if (!matched && tmdbApiKey) {
         const tk = info.title + '|' + (info.year || '');
         if (!titleCache.has(tk)) {
@@ -250,7 +231,6 @@ async function buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey) {
       );
       console.log(`[Meta] tmdbId=${tmdbId} → ${meta.videos.length} eps disponíveis de ${(meta.videos || []).length + availableEps.size}`);
     }
-    // availableEps.size === 0 → sem match → retorna tudo (fallback seguro)
   } catch (e) {
     console.error('[Meta] Erro ao filtrar eps:', e.message);
   }
@@ -258,7 +238,6 @@ async function buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey) {
   return meta;
 }
 
-// ─── STREAMS ──────────────────────────────────────────────────────────────────
 async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, episode, lang) {
   const indexKey = `${type === 'anime' ? 'series' : type}:${tmdbId}`;
   let entries    = tmdbindex.get(indexKey);
@@ -272,7 +251,6 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
       const name = item.name || item.filename || '';
       let found  = false;
 
-      // Tentar matchCache com todos os tipos e langs
       for (const t of ['movie', 'series', 'anime']) {
         for (const l of [lang, 'pt-BR', 'en-US']) {
           const c = matchCache.get(`match:${t}:${l}:${name}`);
@@ -286,7 +264,6 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
       }
     }
 
-    // Fallback: busca via TMDB para candidatos plausíveis
     if (entries.length === 0 && tmdbApiKey) {
       console.log(`[Stream] Fallback TMDB para tmdbId=${tmdbId}`);
       const tmdbType = type === 'movie' ? 'movie' : 'series';
@@ -310,18 +287,8 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
 
   if (!entries || entries.length === 0) return [];
 
-  // ── Filtrar por temporada/episódio ────────────────────────────────────────────
-  // Anime tem 3 esquemas de numeração conflitantes:
-  //  A) Stremio/TMDB:    season=1, episode=33  (absoluta global)
-  //  B) SubsPlease abs:  season=null, episode=33  (mesmo número que TMDB)
-  //  C) SubsPlease S2:   season=2, episode=9  (relativo à temporada)
-  //  1. Estrito: season+episode batem → SxxExx padrão
-  //  2. Só ep bate (season null/diferente) → numeração absoluta
-  //  3. É anime e sem match → numeração relativa → mostra todos os arquivos
   let filtered;
   if (type === 'series' || type === 'anime') {
-    // Camada 1: filtro estrito — suporta packs multi-episódio (S02E02-03)
-    // Um entry cobre o episódio solicitado se: episode >= entry.episode && episode <= entry.episodeEnd
     const strict = entries.filter(({ season: s, episode: e, episodeEnd: eEnd }) => {
       if (season != null && season !== '' && s != null && String(s) !== String(season)) return false;
       if (episode != null && episode !== '' && e != null) {
@@ -337,7 +304,6 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
       filtered = strict;
       console.log(`[Stream] Filtro estrito: ${filtered.length} entries`);
     } else {
-      // Camada 2: só o episódio bate (season null/divergente = numeração absoluta)
       const epOnly = (episode != null && episode !== '')
         ? entries.filter(({ episode: e, episodeEnd: eEnd }) => {
             if (e == null) return false;
@@ -352,8 +318,6 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
         filtered = epOnly;
         console.log(`[Stream] Fallback ep-only (abs): ${filtered.length} entries`);
       } else {
-        // Camada 3: anime com numeração relativa de temporada
-        // arquivos têm season=2 mas Stremio pede season=1 com ep absoluto
         const { guessMediaInfo } = require('./parser');
         const isAnimeContent = entries.some(e => {
           const name = e.item?.name || e.item?.filename || '';
@@ -368,14 +332,11 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
   }
   console.log(`[Stream] ${filtered.length} item(s) para ${indexKey} s=${season} e=${episode}`);
 
-  // ── Coletar streams ────────────────────────────────────────────────────────
   const rawStreams = [];
   for (const { item } of filtered) {
     const files      = await getTorBoxFiles(torboxApiKey, item.source, item.id);
     const videoFiles = files.filter(f => isVideoFile(f.name || f.short_name));
 
-    // Se é anime/série com ep específico pedido, filtrar arquivos pelo ep
-    // (necessário quando o item é um pack com vários eps)
     let targetFiles = videoFiles;
     if ((type === 'series' || type === 'anime') && episode != null && episode !== '' && videoFiles.length > 1) {
       const { guessMediaInfo } = require('./parser');
@@ -383,7 +344,6 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
         const fname = f.name || f.short_name || '';
         const info  = guessMediaInfo(fname);
         if (!info || info.episode == null) return false;
-        // Suporta packs multi-ep no nome do arquivo (S02E02-03, S02E02E03)
         const epReq  = parseInt(episode, 10);
         const epFrom = parseInt(info.episode, 10);
         const epTo   = (info.episodeEnd != null) ? parseInt(info.episodeEnd, 10) : epFrom;
@@ -393,7 +353,6 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
         targetFiles = byEp;
         console.log(`[Stream] Pack filtrado: ${byEp.length}/${videoFiles.length} arquivos para s=${season} e=${episode}`);
       }
-      // Se byEp vazio, mantém todos (melhor que retornar nada)
     }
 
     if (targetFiles.length > 0) {
@@ -413,7 +372,6 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
     }
   }
 
-  // ── Ordenar: 1) idioma 2) resolução 3) tamanho ─────────────────────────────
   const langCode = (lang || 'pt-BR').split('-')[0].toLowerCase();
   rawStreams.sort((a, b) => {
     const dl = langScore(b.fname, langCode) - langScore(a.fname, langCode);
@@ -431,7 +389,6 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
   }));
 }
 
-// ─── SCORING ─────────────────────────────────────────────────────────────────
 function langScore(n = '', langCode = 'pt') {
   const u = n.toUpperCase();
   if (langCode === 'pt') {
@@ -452,7 +409,6 @@ function qualityScore(n = '') {
   return 0;
 }
 
-// ─── FORMATAÇÃO ───────────────────────────────────────────────────────────────
 function formatStreamName(filename = '') {
   const badges = [
     extractQuality(filename),
@@ -464,7 +420,6 @@ function formatStreamName(filename = '') {
 }
 
 function formatStreamDesc(filename = '', size, source) {
-  // Nome completo sem extensão
   const display = filename.replace(/\.(mkv|mp4|avi|mov|ts|wmv|m4v|webm)$/i, '');
   const langStr = extractAudio(filename);
   const subs    = extractSubs(filename);
