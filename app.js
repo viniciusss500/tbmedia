@@ -6,8 +6,16 @@ const { buildCatalog, buildMeta, buildStreams } = require('./src/builder');
 const { imdbToTmdb } = require('./src/tmdb');
 
 const ROOT_DIR = path.resolve(__dirname);
-const cache    = new NodeCache({ stdTTL: 7200 });
-const knownConfigs = new Map();
+
+// ─── DETECÇÃO DE AMBIENTE ──────────────────────────────────────────────────────
+// Em Vercel (serverless), cada request é um processo isolado — cache em memória
+// é destruído após o request. Para self-hosted (Docker/Node), funciona normalmente.
+const IS_SERVERLESS = !!process.env.VERCEL;
+
+const cache = new NodeCache({ stdTTL: 7200 });
+// knownConfigs e setInterval só têm utilidade em processos persistentes (self-hosted)
+const knownConfigs = IS_SERVERLESS ? null : new Map();
+
 const app = express();
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
@@ -22,6 +30,14 @@ app.use((req, res, next) => {
   console.log(`[REQ] ${req.method} ${req.url}`);
   next();
 });
+
+// ─── STATIC (para auto-hospedagem) ────────────────────────────────────────────
+// Em Vercel, a pasta /public é servida automaticamente pelo CDN.
+// Em self-hosted, servimos aqui com Cache-Control longo.
+app.use(express.static(path.join(ROOT_DIR, 'public'), {
+  maxAge: '7d',
+  etag: true,
+}));
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 function decodeConfig(str) {
@@ -42,7 +58,9 @@ function parseExtra(str) {
   return extra;
 }
 
-// ─── BACKGROUND REFRESH ───────────────────────────────────────────────────────
+// ─── BACKGROUND REFRESH (apenas self-hosted) ──────────────────────────────────
+// Em Vercel serverless, o processo é destruído após cada request — setInterval
+// nunca dispara. Em self-hosted (Docker/Node), funciona normalmente.
 const TYPES   = ['movie', 'series', 'anime'];
 const REFRESH = 30 * 60 * 1000;
 
@@ -64,11 +82,23 @@ async function buildAndCacheForConfig(token, config) {
   }
 }
 
-setInterval(() => {
-  for (const [token, config] of knownConfigs.entries()) {
-    buildAndCacheForConfig(token, config).catch(() => {});
-  }
-}, REFRESH);
+if (!IS_SERVERLESS) {
+  setInterval(() => {
+    for (const [token, config] of knownConfigs.entries()) {
+      buildAndCacheForConfig(token, config).catch(() => {});
+    }
+  }, REFRESH);
+}
+
+// ─── LOGO: usa SVG (1.5 KB) em vez do PNG (1.6 MB) ───────────────────────────
+// CORREÇÃO CRÍTICA DE BANDWIDTH:
+// A logo PNG (~1.6 MB) estava hardcoded nos dois manifests e na página /configure.
+// Com 500 usuários carregando 20x/dia: 500 × 20 × 1.6 MB ≈ 15 GB/dia ≈ 450 GB/mês.
+// O arquivo SVG equivalente já existe no projeto com apenas 1.5 KB (1000× menor).
+// Passando a referenciar a URL dinamicamente, funciona em qualquer deploy.
+function getLogoUrl(baseUrl) {
+  return `${baseUrl}/tb-files-tmdb-icon.svg`;
+}
 
 // ─── MANIFESTS ────────────────────────────────────────────────────────────────
 function getBaseManifest(baseUrl) {
@@ -77,14 +107,13 @@ function getBaseManifest(baseUrl) {
     version: '1.4.0',
     name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
-    logo: 'https://tbmedia.vercel.app/file_00000000eb3871fdbe0126338c869eba.png',
+    logo: getLogoUrl(baseUrl),
     resources: ['catalog', 'meta', 'stream'],
     types: ['movie', 'series'],
     idPrefixes: ['torbox:'],
     catalogs: [],
     behaviorHints: { configurable: true, configurationRequired: true },
     configureUrl: `${baseUrl}/configure`,
-    // ✅ Verificação stremio-addons.net
     stremioAddonsConfig: {
       issuer: "https://stremio-addons.net",
       signature: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..wuS2Idc3UAATsil5cgTVBw.YXJH_xCqef9srmpEvQnoCwnA62U2_CPGTB2UfL89gpqVTU928HWIhrHgrfXiQ6Qu_GYfKBjU1dKqKXp2ZGJb0_SoJ0pQK9lvhg23pN2JRXNhBbZirRxumbi3dFUpa3An.fn0tzw5B94KrkB5mXUanAw"
@@ -92,13 +121,13 @@ function getBaseManifest(baseUrl) {
   };
 }
 
-function getConfiguredManifest() {
+function getConfiguredManifest(baseUrl) {
   return {
     id: 'community.torbox.catalog',
     version: '1.4.0',
     name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
-    logo: 'https://tbmedia.vercel.app/file_00000000eb3871fdbe0126338c869eba.png',
+    logo: getLogoUrl(baseUrl),
     resources: [
       'catalog',
       'meta',
@@ -112,7 +141,6 @@ function getConfiguredManifest() {
       { id: 'torbox-anime',   type: 'series', name: '🍥 TorBox Animes',  extra: [{ name: 'skip' }, { name: 'search' }] },
     ],
     behaviorHints: { configurable: true },
-    // ✅ Verificação stremio-addons.net
     stremioAddonsConfig: {
       issuer: "https://stremio-addons.net",
       signature: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..wuS2Idc3UAATsil5cgTVBw.YXJH_xCqef9srmpEvQnoCwnA62U2_CPGTB2UfL89gpqVTU928HWIhrHgrfXiQ6Qu_GYfKBjU1dKqKXp2ZGJb0_SoJ0pQK9lvhg23pN2JRXNhBbZirRxumbi3dFUpa3An.fn0tzw5B94KrkB5mXUanAw"
@@ -124,16 +152,17 @@ function getConfiguredManifest() {
 app.get('/', (req, res) => res.redirect('/manifest.json'));
 app.get('/configure', (req, res) => res.sendFile(path.join(ROOT_DIR, 'configure.html')));
 
-// ✅ CORREÇÃO PRINCIPAL: manifest.json na raiz (exigência do stremio-addons.net)
 app.get('/manifest.json', (req, res) => {
-  // Retorna manifest base com configuração obrigatória
+  // manifest raramente muda → cache de 1h no cliente e CDN
+  res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
   res.json(getBaseManifest(req.protocol + '://' + req.get('host')));
 });
 
 // ─── MANIFEST CONFIGURADO ─────────────────────────────────────────────────────
 app.get('/:token/manifest.json', (req, res) => {
   if (!decodeConfig(req.params.token)) return res.status(400).json({ error: 'Invalid token' });
-  res.json(getConfiguredManifest());
+  res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+  res.json(getConfiguredManifest(req.protocol + '://' + req.get('host')));
 });
 
 // ─── CATALOG ─────────────────────────────────────────────────────────────────
@@ -144,7 +173,6 @@ async function handleCatalog(req, res) {
   const { torboxApiKey, tmdbApiKey, sortBy = 'data_adicao', lang = 'pt-BR' } = config;
   if (!torboxApiKey || !tmdbApiKey) return res.json({ metas: [] });
 
-  // Determinar tipo real: torbox-anime → 'anime', torbox-movies → 'movie', torbox-series → 'series'
   const catalogId = req.params.catalogId;
   let type;
   if (catalogId === 'torbox-anime')   type = 'anime';
@@ -157,8 +185,8 @@ async function handleCatalog(req, res) {
 
   console.log(`[Catalog] type=${type} skip=${skip} lang=${lang}`);
 
-  const token    = req.params.token;
-  if (!knownConfigs.has(token)) {
+  const token = req.params.token;
+  if (!IS_SERVERLESS && !knownConfigs.has(token)) {
     knownConfigs.set(token, config);
     buildAndCacheForConfig(token, config).catch(() => {});
   }
@@ -167,6 +195,7 @@ async function handleCatalog(req, res) {
   const cached   = cache.get(cacheKey);
   if (cached) {
     console.log(`[Catalog] Cache hit → ${cached.metas.length} items`);
+    res.setHeader('Cache-Control', 'public, max-age=900, stale-while-revalidate=3600');
     return res.json(cached);
   }
 
@@ -176,6 +205,7 @@ async function handleCatalog(req, res) {
     console.log(`[Catalog] Built → ${metas.length} metas`);
     const result = { metas };
     cache.set(cacheKey, result);
+    res.setHeader('Cache-Control', 'public, max-age=900, stale-while-revalidate=3600');
     res.json(result);
   } catch (err) {
     console.error('[Catalog] Error:', err.message);
@@ -197,13 +227,17 @@ app.get('/:token/meta/:type/:id.json', async (req, res) => {
 
   const cacheKey = `meta:${id}:${lang}`;
   const cached   = cache.get(cacheKey);
-  if (cached) return res.json(cached);
+  if (cached) {
+    res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+    return res.json(cached);
+  }
 
   try {
     const tmdbId = id.split(':')[2];
     const meta   = await buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey);
     const result = { meta };
     cache.set(cacheKey, result, 3600);
+    res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
     res.json(result);
   } catch (err) {
     console.error('[Meta] Error:', err.message);
@@ -212,8 +246,15 @@ app.get('/:token/meta/:type/:id.json', async (req, res) => {
 });
 
 // ─── STREAM ───────────────────────────────────────────────────────────────────
-// Aceita IDs do nosso catálogo (torbox:movie:12345) E IDs do IMDB (tt1234567)
-// para servir streams quando o usuário está em outro catálogo (Cinemeta, etc.)
+// ARQUITETURA CORRETA — vídeo NÃO passa pelo Vercel:
+//
+//  1) Stremio pede  → Vercel /stream/:id.json
+//  2) Vercel chama  → TorBox API (requestdl) — retorna URL CDN assinada (alguns KB JSON)
+//  3) Vercel responde → { streams: [{ url: "https://cdn.torbox.app/..." }] }  (alguns KB)
+//  4) Stremio conecta → TorBox CDN diretamente (vídeo completo, zero bytes pelo Vercel) ✅
+//
+// O único tráfego que passa pelo Vercel são os JSON de manifesto/catálogo/meta/stream,
+// que são pequenos (alguns KB cada). O vídeo em si vai direto do TorBox para o usuário.
 app.get('/:token/stream/:type/:id.json', async (req, res) => {
   const config = decodeConfig(req.params.token);
   if (!config) return res.json({ streams: [] });
@@ -225,15 +266,12 @@ app.get('/:token/stream/:type/:id.json', async (req, res) => {
   let tmdbId, season, episode;
 
   if (id.startsWith('torbox:')) {
-    // ID do nosso próprio catálogo: torbox:movie:12345 ou torbox:series:12345:1:2
     const parts = id.split(':');
     tmdbId  = parts[2];
     season  = parts[3];
     episode = parts[4];
   } else if (id.startsWith('tt')) {
-    // ID do IMDB vindo de outro catálogo (ex: tt0816692:1:5 para séries)
-    // Formato Stremio para séries: tt1234567:SEASON:EPISODE
-    const parts = id.split(':');
+    const parts  = id.split(':');
     const imdbId = parts[0];
     season  = parts[1];
     episode = parts[2];
@@ -253,6 +291,8 @@ app.get('/:token/stream/:type/:id.json', async (req, res) => {
 
   try {
     const streams = await buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, episode, lang);
+    // URLs do TorBox são assinadas e expiram — cache curto de 5 min
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
     res.json({ streams });
   } catch (err) {
     console.error('[Stream] Error:', err.message);
