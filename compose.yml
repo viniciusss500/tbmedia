@@ -3,14 +3,11 @@ services:
     image: ghcr.io/vinip1250-art/tbmedia:latest
     container_name: tbmedia
     restart: unless-stopped
-
     ports:
       - "7860:7860"
-
     environment:
       - PORT=7860
-      - UPSTASH_REDIS_URL="rediss://default:xxx@xxx.upstash.io:6379"
-
+#      - UPSTASH_REDIS_URL="rediss://default:xxx@xxx.upstash.io:6379"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:7860/"]
       interval: 30s
