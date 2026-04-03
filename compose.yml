@@ -9,7 +9,7 @@ services:
 
     environment:
       - PORT=7860
-      - UPSTASH_REDIS_URL=
+      - UPSTASH_REDIS_URL="rediss://default:xxx@xxx.upstash.io:6379"
 
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:7860/"]
