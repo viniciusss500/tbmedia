@@ -110,6 +110,7 @@ async function matchItem(item, tmdbApiKey, type, lang) {
       torboxItem:           item,
       season:               info.season,
       episode:              info.episode,
+      episodeEnd:           info.episodeEnd ?? null,
     };
 
     matchCache.set(cacheKey, meta);
@@ -153,7 +154,7 @@ async function buildCatalog(downloads, tmdbApiKey, type, sortBy, extra, lang = '
   const seen = new Map();
   for (const meta of results) {
     const indexKey = `${meta.type}:${meta.tmdbId}`;
-    const entry    = { item: meta.torboxItem, season: meta.season, episode: meta.episode };
+    const entry    = { item: meta.torboxItem, season: meta.season, episode: meta.episode, episodeEnd: meta.episodeEnd ?? null };
 
     if (!tmdbindex.has(indexKey)) {
       tmdbindex.set(indexKey, [entry]);
@@ -276,7 +277,7 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
         for (const l of [lang, 'pt-BR', 'en-US']) {
           const c = matchCache.get(`match:${t}:${l}:${name}`);
           if (c && String(c.tmdbId) === String(tmdbId)) {
-            entries.push({ item, season: c.season, episode: c.episode });
+            entries.push({ item, season: c.season, episode: c.episode, episodeEnd: c.episodeEnd ?? null });
             found = true;
             break;
           }
@@ -298,7 +299,7 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
         try {
           const result = await searchMetadata(tmdbApiKey, info.title, tmdbType, info.year, lang);
           if (result && String(result.id) === String(tmdbId)) {
-            entries.push({ item, season: info.season, episode: info.episode });
+            entries.push({ item, season: info.season, episode: info.episode, episodeEnd: info.episodeEnd ?? null });
           }
         } catch {}
       }
@@ -319,10 +320,16 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
   //  3. É anime e sem match → numeração relativa → mostra todos os arquivos
   let filtered;
   if (type === 'series' || type === 'anime') {
-    // Camada 1: filtro estrito (season + episode)
-    const strict = entries.filter(({ season: s, episode: e }) => {
+    // Camada 1: filtro estrito — suporta packs multi-episódio (S02E02-03)
+    // Um entry cobre o episódio solicitado se: episode >= entry.episode && episode <= entry.episodeEnd
+    const strict = entries.filter(({ season: s, episode: e, episodeEnd: eEnd }) => {
       if (season != null && season !== '' && s != null && String(s) !== String(season)) return false;
-      if (episode != null && episode !== '' && e != null && String(e) !== String(episode)) return false;
+      if (episode != null && episode !== '' && e != null) {
+        const epReq  = parseInt(episode, 10);
+        const epFrom = parseInt(e, 10);
+        const epTo   = (eEnd != null) ? parseInt(eEnd, 10) : epFrom;
+        if (epReq < epFrom || epReq > epTo) return false;
+      }
       return true;
     });
 
@@ -332,7 +339,13 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
     } else {
       // Camada 2: só o episódio bate (season null/divergente = numeração absoluta)
       const epOnly = (episode != null && episode !== '')
-        ? entries.filter(({ episode: e }) => e != null && String(e) === String(episode))
+        ? entries.filter(({ episode: e, episodeEnd: eEnd }) => {
+            if (e == null) return false;
+            const epReq  = parseInt(episode, 10);
+            const epFrom = parseInt(e, 10);
+            const epTo   = (eEnd != null) ? parseInt(eEnd, 10) : epFrom;
+            return epReq >= epFrom && epReq <= epTo;
+          })
         : [];
 
       if (epOnly.length > 0) {
@@ -369,12 +382,12 @@ async function buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, epis
       const byEp = videoFiles.filter(f => {
         const fname = f.name || f.short_name || '';
         const info  = guessMediaInfo(fname);
-        if (!info) return false;
-        // Match por ep absoluto OU ep relativo
-        if (info.episode != null && String(info.episode) === String(episode)) return true;
-        if (info.season != null && String(info.season) === String(season) &&
-            info.episode != null && String(info.episode) === String(episode)) return true;
-        return false;
+        if (!info || info.episode == null) return false;
+        // Suporta packs multi-ep no nome do arquivo (S02E02-03, S02E02E03)
+        const epReq  = parseInt(episode, 10);
+        const epFrom = parseInt(info.episode, 10);
+        const epTo   = (info.episodeEnd != null) ? parseInt(info.episodeEnd, 10) : epFrom;
+        return epReq >= epFrom && epReq <= epTo;
       });
       if (byEp.length > 0) {
         targetFiles = byEp;
