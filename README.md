@@ -1,4 +1,3 @@
-```markdown
 # 🎬 TB Media — TorBox Stremio Addon
 
 > 🇧🇷 [Português](#português) · 🇺🇸 [English](#english)
@@ -101,19 +100,18 @@ Após o deploy, instale o addon no Stremio:
 
 1. Abra o Stremio → **Configurações** → **Addons**
 2. Cole a URL de configuração:
-   ```
-   https://seu-projeto.vercel.app/configure
-   ```
+
+https://seu-projeto.vercel.app/configure
+
 3. Na tela de configuração, preencha:
-   - **TorBox API Key** — obtenha em [torbox.app/settings/api](https://torbox.app/settings/api)
-   - **TMDB API Key (v3)** — obtenha em [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
-   - **Ordenar por** — escolha entre: Data de Adição, Data de Lançamento, Título
+- **TorBox API Key** — obtenha em [torbox.app/settings/api](https://torbox.app/settings/api)
+- **TMDB API Key (v3)** — obtenha em [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
+- **Ordenar por** — escolha entre: Data de Adição, Data de Lançamento, Título
 4. Clique em **Instalar**
 
 Ou instale diretamente via URL:
-```
 stremio://seu-projeto.vercel.app/manifest.json
-```
+
 
 ---
 
@@ -138,27 +136,25 @@ Para configurar localmente, use: `http://localhost:7860/configure`
 ---
 
 ### 📁 Estrutura do Projeto
-
-```
 tbmedia/
-├── index.js          # Entry point local (inicia o servidor na porta 7860)
-├── app.js            # Configuração Express + rotas do addon Stremio
+├── index.js # Entry point local (inicia o servidor na porta 7860)
+├── app.js # Configuração Express + rotas do addon Stremio
 ├── api/
-│   └── server.js     # Entry point serverless (Vercel)
+│ └── server.js # Entry point serverless (Vercel)
 ├── src/
-│   ├── torbox.js     # Integração com a API do TorBox
-│   ├── tmdb.js       # Integração com a API do TMDB (PT-BR) + conversão IMDB→TMDB
-│   ├── builder.js    # Constrói catálogo, meta e streams + scoring de streams
-│   ├── parser.js     # Parser inteligente de nomes de arquivos (título, ano, S/E, anime)
-│   └── cache.js      # Camada de cache Redis (Upstash) com fallback gracioso
+│ ├── torbox.js # Integração com a API do TorBox
+│ ├── tmdb.js # Integração com a API do TMDB (PT-BR) + conversão IMDB→TMDB
+│ ├── builder.js # Constrói catálogo, meta e streams + scoring de streams
+│ ├── parser.js # Parser inteligente de nomes de arquivos (título, ano, S/E, anime)
+│ └── cache.js # Camada de cache Redis (Upstash) com fallback gracioso
 ├── public/
-│   └── tb-files-tmdb-icon.svg  # Logo SVG leve do addon
-├── configure.html    # Página de configuração do addon
-├── Dockerfile        # Imagem Docker (node:20-alpine)
-├── compose.yml       # Docker Compose para auto-hospedagem
-├── vercel.json       # Config para deploy no Vercel
+│ └── tb-files-tmdb-icon.svg # Logo SVG leve do addon
+├── configure.html # Página de configuração do addon
+├── Dockerfile # Imagem Docker (node:20-alpine)
+├── compose.yml # Docker Compose para auto-hospedagem
+├── vercel.json # Config para deploy no Vercel
 └── package.json
-```
+
 
 ---
 
@@ -181,55 +177,51 @@ tbmedia/
 ---
 
 ### ⚙️ Como Funciona
-
-```
 Stremio solicita catálogo
-       ↓
+↓
 Cache Redis → hit? retorna imediatamente
-       ↓ (miss)
+↓ (miss)
 TorBox API → lista downloads concluídos (completed/seeding/cached/finalized)
-       ↓
+↓
 Parser → extrai título, ano, temporada/episódio, detecta anime
-       ↓
+↓
 TMDB API → busca metadados em PT-BR
-           └── anime: valida idioma original japonês + gênero Animation
-       ↓
+└── anime: valida idioma original japonês + gênero Animation
+↓
 Catálogo separado por tipo (Filmes / Séries / Animes) retorna ao Stremio
-       ↓
+↓
 Cache Redis → armazena por 1 hora
 
 ─────────────────────────────────────────────────────
 
 Usuário clica em um título (tela de meta)
-       ↓
+↓
 TMDB API → busca todos os episódios da série
-       ↓
+↓
 TorBox → filtra apenas episódios disponíveis no seu acervo
-       ↓
+↓
 Apenas os episódios que você tem são exibidos
 
 ─────────────────────────────────────────────────────
 
 Usuário clica em um episódio (streams)
-       ↓
+↓
 TorBox API → lista arquivos do download (suporta packs multi-ep S02E02-03)
-       ↓
+↓
 TorBox API → gera link direto para cada arquivo de vídeo
-       ↓
+↓
 Streams ordenadas por: idioma PT-BR → qualidade (4K/1080p) → tamanho
-       ↓
+↓
 Stremio reproduz diretamente do CDN do TorBox (sem proxy)
-```
+
 
 ---
 
 ### 🗄️ Cache Redis (Upstash)
 
 O addon suporta cache Redis via [Upstash](https://upstash.com) (plano gratuito disponível). Configure a variável de ambiente:
-
-```
 UPSTASH_REDIS_URL=rediss://default:SUA_SENHA@xxx.upstash.io:6379
-```
+
 
 | Dado | TTL |
 |---|---|
@@ -244,10 +236,8 @@ Sem Redis configurado, o addon funciona normalmente — o cache fica apenas em m
 ---
 
 ### 🩺 Health Check
-
-```
 GET /health
-```
+
 
 Retorna o status do servidor e do cache Redis:
 
@@ -380,19 +370,16 @@ After deploying, install the addon in Stremio:
 
 1. Open Stremio → **Settings** → **Addons**
 2. Paste the configuration URL:
-   ```
-   https://your-project.vercel.app/configure
-   ```
+https://your-project.vercel.app/configure
 3. On the configuration page, fill in:
-   - **TorBox API Key** — get it at [torbox.app/settings/api](https://torbox.app/settings/api)
-   - **TMDB API Key (v3)** — get it at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
-   - **Sort by** — choose between: Date Added, Release Date, Title
+- **TorBox API Key** — get it at [torbox.app/settings/api](https://torbox.app/settings/api)
+- **TMDB API Key (v3)** — get it at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
+- **Sort by** — choose between: Date Added, Release Date, Title
 4. Click **Install**
 
 Or install directly via URL:
-```
 stremio://your-project.vercel.app/manifest.json
-```
+
 
 ---
 
@@ -417,27 +404,25 @@ To configure locally, go to: `http://localhost:7860/configure`
 ---
 
 ### 📁 Project Structure
-
-```
 tbmedia/
-├── index.js          # Local entry point (starts server on port 7860)
-├── app.js            # Express setup + Stremio addon routes
+├── index.js # Local entry point (starts server on port 7860)
+├── app.js # Express setup + Stremio addon routes
 ├── api/
-│   └── server.js     # Serverless entry point (Vercel)
+│ └── server.js # Serverless entry point (Vercel)
 ├── src/
-│   ├── torbox.js     # TorBox API integration
-│   ├── tmdb.js       # TMDB API integration + IMDB→TMDB conversion
-│   ├── builder.js    # Builds catalog, meta, streams + stream scoring
-│   ├── parser.js     # Smart filename parser (title, year, season/episode, anime)
-│   └── cache.js      # Redis (Upstash) cache layer with graceful fallback
+│ ├── torbox.js # TorBox API integration
+│ ├── tmdb.js # TMDB API integration + IMDB→TMDB conversion
+│ ├── builder.js # Builds catalog, meta, streams + stream scoring
+│ ├── parser.js # Smart filename parser (title, year, season/episode, anime)
+│ └── cache.js # Redis (Upstash) cache layer with graceful fallback
 ├── public/
-│   └── tb-files-tmdb-icon.svg  # Lightweight SVG addon logo
-├── configure.html    # Addon configuration page
-├── Dockerfile        # Docker image (node:20-alpine)
-├── compose.yml       # Docker Compose for self-hosting
-├── vercel.json       # Vercel deployment config
+│ └── tb-files-tmdb-icon.svg # Lightweight SVG addon logo
+├── configure.html # Addon configuration page
+├── Dockerfile # Docker image (node:20-alpine)
+├── compose.yml # Docker Compose for self-hosting
+├── vercel.json # Vercel deployment config
 └── package.json
-```
+
 
 ---
 
@@ -460,55 +445,53 @@ tbmedia/
 ---
 
 ### ⚙️ How It Works
-
-```
 Stremio requests catalog
-       ↓
+↓
 Redis Cache → hit? return immediately
-       ↓ (miss)
+↓ (miss)
 TorBox API → fetches completed downloads (completed/seeding/cached/finalized)
-       ↓
+↓
 Parser → extracts title, year, season/episode, detects anime
-       ↓
+↓
 TMDB API → fetches metadata
-           └── anime: validates Japanese original language + Animation genre
-       ↓
+└── anime: validates Japanese original language + Animation genre
+↓
 Separate catalog by type (Movies / Series / Anime) returned to Stremio
-       ↓
+↓
 Redis Cache → stored for 1 hour
 
 ─────────────────────────────────────────────────────
 
 User opens a title (meta screen)
-       ↓
+↓
 TMDB API → fetches all episodes for the series
-       ↓
+↓
 TorBox → filters only episodes available in your library
-       ↓
+↓
 Only the episodes you own are displayed
 
 ─────────────────────────────────────────────────────
 
 User clicks an episode (streams)
-       ↓
+↓
 TorBox API → lists files in the download (supports multi-ep packs S02E02-03)
-       ↓
+↓
 TorBox API → generates direct signed link for each video file
-       ↓
+↓
 Streams sorted by: PT-BR language → quality (4K/1080p) → file size
-       ↓
+↓
 Stremio plays directly from TorBox CDN (zero proxy bytes)
-```
+
+text
 
 ---
 
 ### 🗄️ Redis Cache (Upstash)
 
 The addon supports Redis caching via [Upstash](https://upstash.com) (free tier available). Set the environment variable:
-
-```
 UPSTASH_REDIS_URL=rediss://default:YOUR_PASSWORD@xxx.upstash.io:6379
-```
+
+text
 
 | Data | TTL |
 |---|---|
@@ -523,10 +506,9 @@ Without Redis, the addon works normally — cache stays in memory only (no persi
 ---
 
 ### 🩺 Health Check
-
-```
 GET /health
-```
+
+text
 
 Returns server and Redis cache status:
 
@@ -570,6 +552,7 @@ Returns server and Redis cache status:
 ### 📄 License
 
 MIT
-```
 
-***
+
+
+
