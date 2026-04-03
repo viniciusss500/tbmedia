@@ -3,7 +3,14 @@
  */
 
 const YEAR_RE = /\b(19[5-9]\d|20[0-3]\d)\b/;
-const EP_RE   = /[Ss](\d{1,2})[Ee](\d{1,2})/;
+
+// Captura multi-episódio nos formatos:
+//   S02E02-03     → season=2, episode=2, episodeEnd=3
+//   S02E02-E03    → season=2, episode=2, episodeEnd=3
+//   S02E02E03     → season=2, episode=2, episodeEnd=3
+//   S02E02        → season=2, episode=2, episodeEnd=null
+const EP_RE = /[Ss](\d{1,2})[Ee](\d{1,2})(?:[-–][Ee]?(\d{1,2})|[Ee](\d{1,2}))?/;
+
 const S_RE    = /\b[Ss](\d{1,2})\b(?![Ee\d])/;
 
 // "1ª Temporada", "2a Temporada", "Season 3", "Temporada 2"
@@ -63,20 +70,24 @@ function guessMediaInfo(raw) {
   // Remove www.site.com -
   name = name.replace(/^www\.\S+\s*[-–]+\s*/i, '').trim();
   // Remove WORD.TLD..
-  name = name.replace(/^[A-Z0-9_-]{4,}\.[A-Z]{2,4}(?=\.\.)/i, '').replace(/^[.\s-]+/, '').trim();
+  name = name.replace(/^[A-Z0-9_-]{4,}\.[A-Z]{2,4}(?=\.\.)/i, '').replace(/^[\.\s-]+/, '').trim();
 
   const norm = normalize(name);
 
   // ── Detectar série ─────────────────────────────────────────────────────────
-  let isSeries = false, season = null, episode = null;
+  let isSeries = false, season = null, episode = null, episodeEnd = null;
   let serieCut = norm.length;
 
-  // 1. SxxExx (padrão universal)
+  // 1. SxxExx com suporte a multi-episódio (S02E02-03, S02E02E03, S02E02-E03)
   const epMatch = norm.match(EP_RE);
   if (epMatch) {
     isSeries = true;
     season   = parseInt(epMatch[1], 10);
     episode  = parseInt(epMatch[2], 10);
+    // epMatch[3] cobre "S02E02-03" e "S02E02-E03"
+    // epMatch[4] cobre "S02E02E03"
+    if (epMatch[3]) episodeEnd = parseInt(epMatch[3], 10);
+    else if (epMatch[4]) episodeEnd = parseInt(epMatch[4], 10);
     serieCut = epMatch.index;
   }
 
@@ -150,7 +161,7 @@ function guessMediaInfo(raw) {
     .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(' ');
 
-  return { title, year, isSeries, isAnime, season, episode: episode ?? animeEp };
+  return { title, year, isSeries, isAnime, season, episode: episode ?? animeEp, episodeEnd };
 }
 
 module.exports = { guessMediaInfo };
