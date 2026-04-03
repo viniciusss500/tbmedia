@@ -1,20 +1,17 @@
 const express = require('express');
 const path    = require('path');
-const NodeCache = require('node-cache');
+const cache   = require('./src/cache'); // ✅ Redis cache em vez de NodeCache
 const { getTorBoxDownloads } = require('./src/torbox');
 const { buildCatalog, buildMeta, buildStreams } = require('./src/builder');
 const { imdbToTmdb } = require('./src/tmdb');
-const cache = require('./src/cache');
 
 const ROOT_DIR = path.resolve(__dirname);
 
 // ─── DETECÇÃO DE AMBIENTE ──────────────────────────────────────────────────────
-// Em Vercel (serverless), cada request é um processo isolado — cache em memória
-// é destruído após o request. Para self-hosted (Docker/Node), funciona normalmente.
 const IS_SERVERLESS = !!process.env.VERCEL;
 
-const cache = new NodeCache({ stdTTL: 7200 });
-// knownConfigs e setInterval só têm utilidade em processos persistentes (self-hosted)
+// ✅ Redis cache (persistente entre requests serverless)
+// knownConfigs só é útil em processos persistentes (self-hosted)
 const knownConfigs = IS_SERVERLESS ? null : new Map();
 
 const app = express();
@@ -33,11 +30,11 @@ app.use((req, res, next) => {
 });
 
 // ─── STATIC (para auto-hospedagem) ────────────────────────────────────────────
-// Em Vercel, a pasta /public é servida automaticamente pelo CDN.
-// Em self-hosted, servimos aqui com Cache-Control longo.
+// Cache de 30 dias para assets estáticos
 app.use(express.static(path.join(ROOT_DIR, 'public'), {
-  maxAge: '7d',
+  maxAge: '30d',
   etag: true,
+  immutable: true,
 }));
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -60,8 +57,6 @@ function parseExtra(str) {
 }
 
 // ─── BACKGROUND REFRESH (apenas self-hosted) ──────────────────────────────────
-// Em Vercel serverless, o processo é destruído após cada request — setInterval
-// nunca dispara. Em self-hosted (Docker/Node), funciona normalmente.
 const TYPES   = ['movie', 'series', 'anime'];
 const REFRESH = 30 * 60 * 1000;
 
@@ -74,8 +69,8 @@ async function buildAndCacheForConfig(token, config) {
     const downloads = await getTorBoxDownloads(torboxApiKey);
     for (const type of TYPES) {
       const metas    = await buildCatalog(downloads, tmdbApiKey, type, sortBy, { skip: 0, search: '' }, lang);
-      const cacheKey = `cat:${type}:${sortBy}::0:${torboxApiKey.slice(-6)}:${lang}`;
-      cache.set(cacheKey, { metas });
+      const cacheKey = cache.makeKey('cat', type, sortBy, '', '0', torboxApiKey.slice(-6), lang);
+      await cache.set(cacheKey, { metas }, 3600); // 1 hora
       console.log(`[Cache] ${type} → ${metas.length} itens`);
     }
   } catch (err) {
@@ -92,11 +87,6 @@ if (!IS_SERVERLESS) {
 }
 
 // ─── LOGO: usa SVG (1.5 KB) em vez do PNG (1.6 MB) ───────────────────────────
-// CORREÇÃO CRÍTICA DE BANDWIDTH:
-// A logo PNG (~1.6 MB) estava hardcoded nos dois manifests e na página /configure.
-// Com 500 usuários carregando 20x/dia: 500 × 20 × 1.6 MB ≈ 15 GB/dia ≈ 450 GB/mês.
-// O arquivo SVG equivalente já existe no projeto com apenas 1.5 KB (1000× menor).
-// Passando a referenciar a URL dinamicamente, funciona em qualquer deploy.
 function getLogoUrl(baseUrl) {
   return `${baseUrl}/tb-files-tmdb-icon.svg`;
 }
@@ -105,7 +95,7 @@ function getLogoUrl(baseUrl) {
 function getBaseManifest(baseUrl) {
   return {
     id: 'community.torbox.catalog',
-    version: '1.4.0',
+    version: '1.4.1', // ✅ Bumped version após otimizações
     name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
     logo: getLogoUrl(baseUrl),
@@ -125,7 +115,7 @@ function getBaseManifest(baseUrl) {
 function getConfiguredManifest(baseUrl) {
   return {
     id: 'community.torbox.catalog',
-    version: '1.4.0',
+    version: '1.4.1', // ✅ Bumped version após otimizações
     name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
     logo: getLogoUrl(baseUrl),
@@ -153,16 +143,27 @@ function getConfiguredManifest(baseUrl) {
 app.get('/', (req, res) => res.redirect('/manifest.json'));
 app.get('/configure', (req, res) => res.sendFile(path.join(ROOT_DIR, 'configure.html')));
 
+// ✅ Endpoint de health check / stats
+app.get('/health', async (req, res) => {
+  const stats = await cache.getStats();
+  res.json({
+    status: 'ok',
+    cache: stats,
+    environment: IS_SERVERLESS ? 'serverless' : 'self-hosted',
+    version: '1.4.1',
+  });
+});
+
 app.get('/manifest.json', (req, res) => {
-  // manifest raramente muda → cache de 1h no cliente e CDN
-  res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+  // ✅ OTIMIZAÇÃO: Cache de 24h + stale-while-revalidate de 7 dias
+  res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800, immutable');
   res.json(getBaseManifest(req.protocol + '://' + req.get('host')));
 });
 
 // ─── MANIFEST CONFIGURADO ─────────────────────────────────────────────────────
 app.get('/:token/manifest.json', (req, res) => {
   if (!decodeConfig(req.params.token)) return res.status(400).json({ error: 'Invalid token' });
-  res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+  res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800, immutable');
   res.json(getConfiguredManifest(req.protocol + '://' + req.get('host')));
 });
 
@@ -192,11 +193,13 @@ async function handleCatalog(req, res) {
     buildAndCacheForConfig(token, config).catch(() => {});
   }
 
-  const cacheKey = `cat:${type}:${sortBy}:${search}:${skip}:${torboxApiKey.slice(-6)}:${lang}`;
-  const cached   = cache.get(cacheKey);
+  // ✅ Redis cache com chave formatada
+  const cacheKey = cache.makeKey('cat', type, sortBy, search, skip.toString(), torboxApiKey.slice(-6), lang);
+  const cached   = await cache.get(cacheKey);
+  
   if (cached) {
     console.log(`[Catalog] Cache hit → ${cached.metas.length} items`);
-    res.setHeader('Cache-Control', 'public, max-age=900, stale-while-revalidate=3600');
+    res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=21600');
     return res.json(cached);
   }
 
@@ -204,9 +207,11 @@ async function handleCatalog(req, res) {
     const downloads = await getTorBoxDownloads(torboxApiKey);
     const metas     = await buildCatalog(downloads, tmdbApiKey, type, sortBy, { skip, search }, lang);
     console.log(`[Catalog] Built → ${metas.length} metas`);
+    
     const result = { metas };
-    cache.set(cacheKey, result);
-    res.setHeader('Cache-Control', 'public, max-age=900, stale-while-revalidate=3600');
+    await cache.set(cacheKey, result, 3600); // 1 hora
+    
+    res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=21600');
     res.json(result);
   } catch (err) {
     console.error('[Catalog] Error:', err.message);
@@ -226,10 +231,12 @@ app.get('/:token/meta/:type/:id.json', async (req, res) => {
   const { type, id } = req.params;
   if (!tmdbApiKey || !id.startsWith('torbox:')) return res.json({ meta: null });
 
-  const cacheKey = `meta:${id}:${lang}`;
-  const cached   = cache.get(cacheKey);
+  // ✅ Redis cache
+  const cacheKey = cache.makeKey('meta', id, lang);
+  const cached   = await cache.get(cacheKey);
+  
   if (cached) {
-    res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
     return res.json(cached);
   }
 
@@ -237,8 +244,10 @@ app.get('/:token/meta/:type/:id.json', async (req, res) => {
     const tmdbId = id.split(':')[2];
     const meta   = await buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey);
     const result = { meta };
-    cache.set(cacheKey, result, 3600);
-    res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+    
+    await cache.set(cacheKey, result, 86400); // 24 horas
+    
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
     res.json(result);
   } catch (err) {
     console.error('[Meta] Error:', err.message);
@@ -247,15 +256,12 @@ app.get('/:token/meta/:type/:id.json', async (req, res) => {
 });
 
 // ─── STREAM ───────────────────────────────────────────────────────────────────
-// ARQUITETURA CORRETA — vídeo NÃO passa pelo Vercel:
+// ✅ ARQUITETURA CORRETA — vídeo NÃO passa pelo Vercel:
 //
 //  1) Stremio pede  → Vercel /stream/:id.json
 //  2) Vercel chama  → TorBox API (requestdl) — retorna URL CDN assinada (alguns KB JSON)
 //  3) Vercel responde → { streams: [{ url: "https://cdn.torbox.app/..." }] }  (alguns KB)
 //  4) Stremio conecta → TorBox CDN diretamente (vídeo completo, zero bytes pelo Vercel) ✅
-//
-// O único tráfego que passa pelo Vercel são os JSON de manifesto/catálogo/meta/stream,
-// que são pequenos (alguns KB cada). O vídeo em si vai direto do TorBox para o usuário.
 app.get('/:token/stream/:type/:id.json', async (req, res) => {
   const config = decodeConfig(req.params.token);
   if (!config) return res.json({ streams: [] });
@@ -278,11 +284,23 @@ app.get('/:token/stream/:type/:id.json', async (req, res) => {
     episode = parts[2];
 
     console.log(`[Stream] IMDB ID ${imdbId} → buscando TMDB...`);
-    const found = await imdbToTmdb(tmdbApiKey, imdbId).catch(() => null);
+    
+    // ✅ Cache de conversão IMDB → TMDB
+    const imdbCacheKey = cache.makeKey('imdb', imdbId);
+    let found = await cache.get(imdbCacheKey);
+    
+    if (!found) {
+      found = await imdbToTmdb(tmdbApiKey, imdbId).catch(() => null);
+      if (found) {
+        await cache.set(imdbCacheKey, found, 604800); // 7 dias
+      }
+    }
+    
     if (!found) {
       console.log(`[Stream] IMDB ${imdbId} não encontrado no TMDB`);
       return res.json({ streams: [] });
     }
+    
     tmdbId = found.tmdbId;
     type   = found.type;
     console.log(`[Stream] IMDB ${imdbId} → TMDB ${tmdbId} (${type})`);
@@ -292,8 +310,10 @@ app.get('/:token/stream/:type/:id.json', async (req, res) => {
 
   try {
     const streams = await buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, episode, lang);
-    // URLs do TorBox são assinadas e expiram — cache curto de 5 min
-    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+    
+    // ✅ OTIMIZAÇÃO: Cache de 10min
+    // URLs do TorBox são assinadas e expiram, mas podemos cachear por alguns minutos
+    res.setHeader('Cache-Control', 'public, max-age=600, stale-while-revalidate=1800');
     res.json({ streams });
   } catch (err) {
     console.error('[Stream] Error:', err.message);
