@@ -2,13 +2,8 @@ const axios = require('axios');
 
 const TORBOX_BASE = 'https://api.torbox.app/v1/api';
 
-// Rastreia se já avisamos sobre usenet indisponível (evita spam no log)
 let usenetUnavailableLogged = false;
 
-/**
- * Faz uma requisição GET ao TorBox com tratamento de erro granular.
- * Retorna { data, status } ou { error, status } em caso de falha.
- */
 async function torboxGet(path, apiKey, params = {}) {
   const headers = { Authorization: `Bearer ${apiKey}` };
   try {
@@ -21,11 +16,7 @@ async function torboxGet(path, apiKey, params = {}) {
   }
 }
 
-/**
- * Busca todos os downloads concluídos do TorBox (torrents + usenet).
- */
 async function getTorBoxDownloads(apiKey) {
-  // bypass_cache: false → usa cache do servidor (mais rápido e compatível com todos os planos)
   const params = { bypass_cache: false };
 
   const [torrentsResult, usenetResult] = await Promise.all([
@@ -35,7 +26,6 @@ async function getTorBoxDownloads(apiKey) {
 
   let items = [];
 
-  // ── Torrents ────────────────────────────────────────────────────────────────
   if (!torrentsResult.error) {
     const data = torrentsResult.data?.data;
     const list = Array.isArray(data) ? data : (data ? [data] : []);
@@ -52,7 +42,6 @@ async function getTorBoxDownloads(apiKey) {
     }
   }
 
-  // ── Usenet ──────────────────────────────────────────────────────────────────
   if (!usenetResult.error) {
     const data = usenetResult.data?.data;
     const list = Array.isArray(data) ? data : (data ? [data] : []);
@@ -61,7 +50,6 @@ async function getTorBoxDownloads(apiKey) {
   } else {
     const s = usenetResult.status;
     if (s === 403 || s === 401) {
-      // 403/401 em usenet = plano não inclui usenet. Logar apenas uma vez.
       if (!usenetUnavailableLogged) {
         console.log('[TorBox] Usenet: não disponível neste plano (ignorando).');
         usenetUnavailableLogged = true;
@@ -76,7 +64,6 @@ async function getTorBoxDownloads(apiKey) {
   const states = [...new Set(items.map(i => i.download_state))];
   if (states.length > 0) console.log(`[TorBox] Estados encontrados:`, states);
 
-  // TorBox states: "completed", "seeding", "cached", "finalized", + download_finished / download_present
   const completed = items.filter(i => {
     const state = (i.download_state || '').toLowerCase();
     return (
@@ -97,9 +84,6 @@ async function getTorBoxDownloads(apiKey) {
   return completed;
 }
 
-/**
- * Obtém link de stream direto para um arquivo específico.
- */
 async function getTorBoxStreamLink(apiKey, source, itemId, fileId) {
   const headers = { Authorization: `Bearer ${apiKey}` };
   const endpoint = source === 'torrent'
@@ -120,9 +104,6 @@ async function getTorBoxStreamLink(apiKey, source, itemId, fileId) {
   }
 }
 
-/**
- * Lista arquivos dentro de um item do TorBox.
- */
 async function getTorBoxFiles(apiKey, source, itemId) {
   const headers = { Authorization: `Bearer ${apiKey}` };
   const endpoint = source === 'torrent'
