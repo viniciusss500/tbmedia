@@ -1,26 +1,14 @@
-/**
- * Parser de nomes de torrent/usenet.
- */
 
 const YEAR_RE = /\b(19[5-9]\d|20[0-3]\d)\b/;
 
-// Captura multi-episódio nos formatos:
-//   S02E02-03     → season=2, episode=2, episodeEnd=3
-//   S02E02-E03    → season=2, episode=2, episodeEnd=3
-//   S02E02E03     → season=2, episode=2, episodeEnd=3
-//   S02E02        → season=2, episode=2, episodeEnd=null
 const EP_RE = /[Ss](\d{1,2})[Ee](\d{1,2})(?:[-–][Ee]?(\d{1,2})|[Ee](\d{1,2}))?/;
 
 const S_RE    = /\b[Ss](\d{1,2})\b(?![Ee\d])/;
 
-// "1ª Temporada", "2a Temporada", "Season 3", "Temporada 2"
 const SEASON_WORD_RE = /\b(?:season|temporada)\s*(\d{1,2})\b/i;
-// "1ª Temporada" com ordinal pt
 const SEASON_ORD_RE  = /\b(\d{1,2})[aªº°]\s+temporada\b/i;
-// "Parte 2", "Part 2"  (mini-séries)
 const PART_RE        = /\b(?:parte?|part)\s*(\d)\b/i;
 
-// Grupos de release de anime conhecidos
 const ANIME_GROUPS = [
   'SubsPlease','Erai-raws','HorribleSubs','WF','ASW','Yameii','Judas',
   'LostYears','Tsundere-Raws','Nii-sama','Okay-Subs','GS','Asenshi',
@@ -30,14 +18,11 @@ const ANIME_GROUPS = [
 ];
 const ANIME_GROUP_RE = new RegExp(`^\\[(${ANIME_GROUPS.join('|')})[^\\]]*\\]`, 'i');
 
-// Padrão de episódio anime: "- 01" ou "- 01v2" ou título seguido de número + [
 const ANIME_EP_RE  = /\s[-–]\s+(\d{1,3})(?:v\d+)?\s*(?:\[|$)/;
 const ANIME_EP2_RE = /^(.+?)\s+(\d{2,3})(?:v\d+)?\s*[\[(]/;
 
-// "2nd Season", "3rd Season", "Xth Season" → extrai número ordinal inglês
 const SEASON_ORD_EN_RE = /\b(\d+)(?:st|nd|rd|th)\s+season\b/i;
 
-// Caracteres japoneses/CJK
 const CJK_RE = /[\u3040-\u30FF\u4E00-\u9FFF]/;
 
 const TECH = [
@@ -61,51 +46,40 @@ function guessMediaInfo(raw) {
 
   let name = raw.replace(/\.(mkv|mp4|avi|mov|ts|wmv|m4v|webm)$/i, '').trim();
 
-  // Detectar anime pelo grupo antes de remover o colchete
   const isAnimeGroup = ANIME_GROUP_RE.test(name);
   const hasCJK       = CJK_RE.test(name);
 
-  // Remove [Grupo] no início
   name = name.replace(/^\[[^\]]{1,50}\]\s*/, '').trim();
-  // Remove www.site.com -
   name = name.replace(/^www\.\S+\s*[-–]+\s*/i, '').trim();
-  // Remove WORD.TLD..
   name = name.replace(/^[A-Z0-9_-]{4,}\.[A-Z]{2,4}(?=\.\.)/i, '').replace(/^[\.\s-]+/, '').trim();
 
   const norm = normalize(name);
 
-  // ── Detectar série ─────────────────────────────────────────────────────────
   let isSeries = false, season = null, episode = null, episodeEnd = null;
   let serieCut = norm.length;
 
-  // 1. SxxExx com suporte a multi-episódio (S02E02-03, S02E02E03, S02E02-E03)
   const epMatch = norm.match(EP_RE);
   if (epMatch) {
     isSeries = true;
     season   = parseInt(epMatch[1], 10);
     episode  = parseInt(epMatch[2], 10);
-    // epMatch[3] cobre "S02E02-03" e "S02E02-E03"
-    // epMatch[4] cobre "S02E02E03"
     if (epMatch[3]) episodeEnd = parseInt(epMatch[3], 10);
     else if (epMatch[4]) episodeEnd = parseInt(epMatch[4], 10);
     serieCut = epMatch.index;
   }
 
-  // 2. Só Sxx sem episódio — mas ainda tenta capturar ep anime ("S2 - 01")
   if (!isSeries) {
     const sm = norm.match(S_RE);
     if (sm) {
       isSeries = true;
       season   = parseInt(sm[1], 10);
       serieCut = sm.index;
-      // Após o Sxx pode vir " - 01" — capturar o episódio
       const afterS = norm.slice(sm.index + sm[0].length);
       const ae = afterS.match(/^\s*[-\u2013]\s+(\d{1,3})(?:v\d+)?/);
       if (ae) episode = parseInt(ae[1], 10);
     }
   }
 
-  // 3. "Temporada X" / "Season X" / "Xª Temporada" / "2nd Season"
   if (!isSeries) {
     const tw = norm.match(SEASON_WORD_RE) || norm.match(SEASON_ORD_RE) || norm.match(SEASON_ORD_EN_RE);
     if (tw) {
@@ -115,7 +89,6 @@ function guessMediaInfo(raw) {
     }
   }
 
-  // 4. Episódio anime: "- 01" ou "Title 01 ["
   let animeEp = null;
   if (!isSeries || episode === null) {
     const ae = norm.match(ANIME_EP_RE);
@@ -130,14 +103,12 @@ function guessMediaInfo(raw) {
 
   const isAnime = isAnimeGroup || hasCJK || (isSeries && animeEp !== null);
 
-  // ── Corte técnico ──────────────────────────────────────────────────────────
   let techCut = norm.length;
   for (const re of TECH) {
     const m = norm.match(re);
     if (m && m.index < techCut) techCut = m.index;
   }
 
-  // Corte pelo ano
   const ym = norm.match(YEAR_RE);
   let year = null;
   if (ym) { year = parseInt(ym[1], 10); if (ym.index < techCut) techCut = ym.index; }
@@ -147,7 +118,6 @@ function guessMediaInfo(raw) {
 
   title = title.replace(/\s*\([^)]*\)/g, '');
   title = title.replace(/\s*\[[^\]]*\]/g, '');
-  // Remove "- 1ª Temporada" ou "- Season 2" ou "2nd Season" que ficaram no título
   title = title.replace(/\s*[-–]\s*(?:\d+[aªº°]\s*)?(?:temporada|season).*$/i, '');
   title = title.replace(/\s+\d+(?:st|nd|rd|th)\s+season.*$/i, '');
   title = title.replace(/[\s([{]+$/, '').trim();
