@@ -1,4 +1,4 @@
-# 🎬 TB Media — TorBox Stremio Addon
+# 🎬 TB Media — TorBox e Real-Debrid Stremio Addon
 
 > 🇧🇷 [Português](#português) · 🇺🇸 [English](#english)
 
@@ -6,7 +6,7 @@
 
 ## Português
 
-Addon para o Stremio que exibe seu catálogo pessoal do **TorBox** (torrents e usenet) com metadados em **Português BR** obtidos do TMDB.
+Addon para o Stremio que exibe seu catálogo pessoal do **TorBox** e **Real-Debrid** (torrents e usenet) com metadados em **Português BR** obtidos do TMDB.
 
 ### ✨ Funcionalidades
 
@@ -207,7 +207,7 @@ GET /health
 
 ## English
 
-A Stremio addon that displays your personal **TorBox** catalog (torrents and usenet) with metadata from TMDB.
+A Stremio addon that displays your personal **TorBox** and **Real-Debrid** catalog (torrents and usenet) with metadata from TMDB.
 
 ### ✨ Features
 
