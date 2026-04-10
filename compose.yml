@@ -1,13 +1,23 @@
 services:
   tbmedia:
-    image: ghcr.io/vinip1250-art/tbmedia:latest
+    build: .
+#    image: ghcr.io/vinip1250-art/tbmedia:latest
     container_name: tbmedia
     restart: unless-stopped
     ports:
       - "7860:7860"
     environment:
       - PORT=7860
-#      - UPSTASH_REDIS_URL="rediss://default:xxx@xxx.upstash.io:6379"
+      # TTL do cache em segundos (padrão: catálogo=3600, streams=21600)
+      #- CACHE_TTL_CATALOG=3600
+      #- CACHE_TTL_STREAM=21600
+      # Redis via URL (Upstash ou qualquer Redis com URL)
+      #- REDIS_URL=rediss://default:senha@host.upstash.io:6379
+      # Redis local por partes
+      #- REDIS_HOST=redis
+      #- REDIS_PORT=6379
+      #- REDIS_PASSWORD=
+      #- REDIS_TLS=false
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:7860/"]
       interval: 30s

@@ -16,14 +16,14 @@ Addon para o Stremio que exibe seu catálogo pessoal do **TorBox** (torrents e u
 - 📅 **Ordenação** por data de adição, data de lançamento ou título
 - 🔍 **Busca** dentro do catálogo
 - ▶️ **Reprodução direta** — ao clicar no título, as versões disponíveis no TorBox aparecem para play no Stremio
-- 🎯 **Filtro de episódios** — a tela de detalhes exibe apenas os episódios que você realmente tem no TorBox
+- 🎯 **Filtro preciso de episódios** — a tela de detalhes exibe apenas os episódios que você realmente tem no TorBox (episódios individuais, temporadas completas ou packs)
 - 📦 **Suporte a packs multi-episódio** — arquivos no formato `S02E02-03` são mapeados corretamente
-- 🏷️ **Streams detalhadas** — cada stream exibe qualidade (4K/1080p/720p), codec (H.265/H.264/AV1), HDR/Dolby Vision, idioma (Dublado/PT-BR/Legendado), áudio (Atmos/TrueHD/DTS) e tamanho do arquivo
+- 🏷️ **Streams detalhadas** — cada stream exibe qualidade (🎞️ 4K / 🎞️ FHD / 💿 HD), codec, HDR/Dolby Vision, source, idioma, áudio, tamanho e release group
 - 🔀 **Ordenação inteligente de streams** — priorizadas por idioma PT-BR → legendado → qualidade → tamanho
-- 🔗 **Compatibilidade com IMDB ID** — streams funcionam ao abrir títulos de outros addons pelo ID IMDB
+- 🔒 **Streams exclusivas do catálogo próprio** — o addon não responde a buscas de outros addons (Cinemeta, etc.)
 - ⚡ Suporte a **Torrents e Usenet** do TorBox
-- 🗄️ **Cache Redis (Upstash)** — cache persistente entre requests, compatível com ambientes serverless
-- 🔄 **Background refresh** — em auto-hospedagem, o catálogo é atualizado automaticamente a cada 30 minutos
+- 🗄️ **Cache Redis** — cache persistente com invalidação automática ao detectar novos downloads
+- 🔄 **Background refresh inteligente** — em auto-hospedagem, o catálogo é atualizado automaticamente a cada 30 minutos, mas só reconstrói se houver mudança na lista de downloads
 - 🩺 **Endpoint `/health`** — monitore o status do addon e do cache Redis
 - 🐳 **Docker ready** — imagem oficial publicada no GHCR
 
@@ -38,7 +38,7 @@ Addon para o Stremio que exibe seu catálogo pessoal do **TorBox** (torrents e u
 1. Faça um fork/clone deste repositório no GitHub
 2. Acesse [vercel.com](https://vercel.com) e importe o repositório
 3. Clique em **Deploy** (sem variáveis de ambiente obrigatórias — as chaves são configuradas pelo usuário no Stremio)
-4. *(Opcional)* Configure `UPSTASH_REDIS_URL` nas variáveis de ambiente para habilitar cache Redis persistente
+4. *(Opcional)* Configure `REDIS_URL` nas variáveis de ambiente para habilitar cache Redis persistente
 
 **URL do addon:** `https://seu-projeto.vercel.app`
 
@@ -50,9 +50,7 @@ Addon para o Stremio que exibe seu catálogo pessoal do **TorBox** (torrents e u
 
 1. Faça um fork deste repositório no GitHub
 2. Acesse [render.com](https://render.com) → New → Web Service
-3. Conecte o repositório
-4. Render detecta automaticamente o `render.yaml`
-5. Clique em **Create Web Service**
+3. Conecte o repositório e clique em **Create Web Service**
 
 **URL do addon:** `https://seu-projeto.onrender.com`
 
@@ -61,8 +59,6 @@ Addon para o Stremio que exibe seu catálogo pessoal do **TorBox** (torrents e u
 ---
 
 #### Opção 3 — Docker / Auto-hospedagem (recomendado para uso contínuo)
-
-Use a imagem pré-compilada do GitHub Container Registry:
 
 ```yaml
 # compose.yml
@@ -75,8 +71,16 @@ services:
       - "7860:7860"
     environment:
       - PORT=7860
-      # Opcional: habilita cache Redis persistente
-      # - UPSTASH_REDIS_URL=rediss://default:xxx@xxx.upstash.io:6379
+      # TTL do cache em segundos (padrão: catálogo=3600, streams=21600)
+      #- CACHE_TTL_CATALOG=3600
+      #- CACHE_TTL_STREAM=21600
+      # Redis via URL
+      #- REDIS_URL=rediss://default:senha@host.upstash.io:6379
+      # Redis local por partes
+      #- REDIS_HOST=redis
+      #- REDIS_PORT=6379
+      #- REDIS_PASSWORD=
+      #- REDIS_TLS=false
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:7860/"]
       interval: 30s
@@ -90,156 +94,91 @@ docker compose up -d
 
 **URL do addon:** `http://seu-servidor:7860`
 
-> 💡 Em modo Docker, o background refresh atualiza o catálogo automaticamente a cada 30 minutos.
-
 ---
 
 ### 🔧 Configuração no Stremio
 
-Após o deploy, instale o addon no Stremio:
-
 1. Abra o Stremio → **Configurações** → **Addons**
-2. Cole a URL de configuração:
-
-https://seu-projeto.vercel.app/configure
-
-3. Na tela de configuração, preencha:
-- **TorBox API Key** — obtenha em [torbox.app/settings/api](https://torbox.app/settings/api)
-- **TMDB API Key (v3)** — obtenha em [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
-- **Ordenar por** — escolha entre: Data de Adição, Data de Lançamento, Título
+2. Cole a URL de configuração: `https://seu-projeto.vercel.app/configure`
+3. Preencha:
+   - **TorBox API Key** — obtenha em [torbox.app/settings/api](https://torbox.app/settings/api)
+   - **TMDB API Key (v3)** — obtenha em [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
+   - **Ordenar por** — Data de Adição, Data de Lançamento ou Título
 4. Clique em **Instalar**
 
-Ou instale diretamente via URL:
-stremio://seu-projeto.vercel.app/manifest.json
+---
 
+### ⚙️ Variáveis de Ambiente
+
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `PORT` | `7860` | Porta do servidor |
+| `CACHE_TTL_CATALOG` | `3600` | TTL do cache de catálogo (segundos) |
+| `CACHE_TTL_STREAM` | `21600` | TTL do cache de streams (segundos) |
+| `REDIS_URL` | — | URL completa do Redis (`redis://` ou `rediss://`) |
+| `UPSTASH_REDIS_URL` | — | Alias para `REDIS_URL` (compatibilidade) |
+| `REDIS_HOST` | — | Host do Redis (alternativa à URL) |
+| `REDIS_PORT` | `6379` | Porta do Redis |
+| `REDIS_PASSWORD` | — | Senha do Redis |
+| `REDIS_TLS` | `false` | Habilita TLS (auto-detectado em URLs `rediss://`) |
+
+---
+
+### 🗄️ Cache Redis
+
+Suporta qualquer Redis compatível (Upstash, Redis local, etc.).
+
+| Dado | TTL padrão |
+|---|---|
+| Catálogo | 1 hora (`CACHE_TTL_CATALOG`) |
+| Streams | 6 horas (`CACHE_TTL_STREAM`) |
+| Metadados (meta) | 24 horas |
+| Hash de downloads | 2 horas |
+
+**Invalidação automática:** a cada request de catálogo (e no background refresh), o addon compara um hash da lista de downloads com o valor em cache. Se houver novos arquivos, o cache do catálogo é invalidado e reconstruído imediatamente — sem esperar o TTL expirar.
+
+Sem Redis configurado, o addon funciona normalmente sem cache persistente.
 
 ---
 
 ### 🛠️ Desenvolvimento Local
 
 ```bash
-# Instalar dependências
 npm install
-
-# Rodar localmente (porta 7860)
-npm start
-
-# Ou com hot-reload
-npm run dev
+npm start      # porta 7860
+npm run dev    # com hot-reload
 ```
-
-Acesse `http://localhost:7860` para ver o manifest.  
-Para configurar localmente, use: `http://localhost:7860/configure`
 
 > Requer **Node.js >= 24**.
 
 ---
 
 ### 📁 Estrutura do Projeto
+
+```
 tbmedia/
-├── index.js # Entry point local (inicia o servidor na porta 7860)
-├── app.js # Configuração Express + rotas do addon Stremio
-├── api/
-│ └── server.js # Entry point serverless (Vercel)
+├── index.js          # Entry point local
+├── app.js            # Express + rotas Stremio
+├── api/server.js     # Entry point serverless (Vercel)
 ├── src/
-│ ├── torbox.js # Integração com a API do TorBox
-│ ├── tmdb.js # Integração com a API do TMDB (PT-BR) + conversão IMDB→TMDB
-│ ├── builder.js # Constrói catálogo, meta e streams + scoring de streams
-│ ├── parser.js # Parser inteligente de nomes de arquivos (título, ano, S/E, anime)
-│ └── cache.js # Camada de cache Redis (Upstash) com fallback gracioso
-├── public/
-│ └── tb-files-tmdb-icon.svg # Logo SVG leve do addon
-├── configure.html # Página de configuração do addon
-├── Dockerfile # Imagem Docker (node:20-alpine)
-├── compose.yml # Docker Compose para auto-hospedagem
-├── vercel.json # Config para deploy no Vercel
-└── package.json
-
-
----
-
-### 🔑 APIs Utilizadas
-
-#### TorBox API
-- `GET /v1/api/torrents/mylist` — lista todos os torrents
-- `GET /v1/api/usenet/mylist` — lista todos os downloads usenet
-- `GET /v1/api/torrents/requestdl` — gera link de download direto (torrent)
-- `GET /v1/api/usenet/requestdl` — gera link de download direto (usenet)
-
-#### TMDB API (PT-BR)
-- `GET /search/movie` e `/search/tv` — busca por título (com detecção de anime via `original_language` + `genre_ids`)
-- `GET /movie/{id}` e `/tv/{id}` — metadados completos (com `append_to_response=videos,images`)
-- `GET /tv/{id}/season/{n}` — episódios de cada temporada
-- `GET /tv/{id}/credits` e `/movie/{id}/credits` — elenco e direção
-- `GET /tv/{id}/external_ids` — ID IMDB para deep link
-- `GET /find/{imdb_id}` — conversão de IMDB ID para TMDB ID
-
----
-
-### ⚙️ Como Funciona
-Stremio solicita catálogo
-↓
-Cache Redis → hit? retorna imediatamente
-↓ (miss)
-TorBox API → lista downloads concluídos (completed/seeding/cached/finalized)
-↓
-Parser → extrai título, ano, temporada/episódio, detecta anime
-↓
-TMDB API → busca metadados em PT-BR
-└── anime: valida idioma original japonês + gênero Animation
-↓
-Catálogo separado por tipo (Filmes / Séries / Animes) retorna ao Stremio
-↓
-Cache Redis → armazena por 1 hora
-
-─────────────────────────────────────────────────────
-
-Usuário clica em um título (tela de meta)
-↓
-TMDB API → busca todos os episódios da série
-↓
-TorBox → filtra apenas episódios disponíveis no seu acervo
-↓
-Apenas os episódios que você tem são exibidos
-
-─────────────────────────────────────────────────────
-
-Usuário clica em um episódio (streams)
-↓
-TorBox API → lista arquivos do download (suporta packs multi-ep S02E02-03)
-↓
-TorBox API → gera link direto para cada arquivo de vídeo
-↓
-Streams ordenadas por: idioma PT-BR → qualidade (4K/1080p) → tamanho
-↓
-Stremio reproduz diretamente do CDN do TorBox (sem proxy)
-
-
----
-
-### 🗄️ Cache Redis (Upstash)
-
-O addon suporta cache Redis via [Upstash](https://upstash.com) (plano gratuito disponível). Configure a variável de ambiente:
-UPSTASH_REDIS_URL=rediss://default:SUA_SENHA@xxx.upstash.io:6379
-
-
-| Dado | TTL |
-|---|---|
-| Catálogo | 1 hora |
-| Metadados (meta) | 24 horas |
-| Conversão IMDB → TMDB | 7 dias |
-| Manifest | 24 horas |
-| Streams | 10 minutos |
-
-Sem Redis configurado, o addon funciona normalmente — o cache fica apenas em memória (sem persistência entre requests no Vercel).
+│   ├── torbox.js     # Integração TorBox API
+│   ├── tmdb.js       # Integração TMDB API (PT-BR)
+│   ├── builder.js    # Catálogo, meta, streams + scoring
+│   ├── parser.js     # Parser de nomes de arquivo
+│   └── cache.js      # Camada Redis com fallback
+├── configure.html    # Página de configuração
+├── Dockerfile
+├── compose.yml
+└── vercel.json
+```
 
 ---
 
 ### 🩺 Health Check
+
+```
 GET /health
-
-
-Retorna o status do servidor e do cache Redis:
+```
 
 ```json
 {
@@ -254,27 +193,13 @@ Retorna o status do servidor e do cache Redis:
 
 ### 🐛 Solução de Problemas
 
-**Catálogo vazio:**
-- Verifique se as chaves de API estão corretas
-- Confirme que há downloads **concluídos** no TorBox (estados aceitos: `completed`, `seeding`, `cached`, `finalized`)
-- Acesse `/health` para verificar se o Redis está conectado
-- Verifique os logs do servidor para erros
+**Catálogo vazio:** verifique as chaves de API e se há downloads concluídos no TorBox (`completed`, `seeding`, `cached`, `finalized`).
 
-**Animes aparecendo nas Séries (ou vice-versa):**
-- A detecção usa o TMDB: somente títulos com idioma original japonês + gênero Animation vão para o catálogo de Animes
-- Se um anime não aparecer no catálogo correto, pode ser que o nome do arquivo esteja muito modificado
+**Episódios errados aparecendo:** acesse `/cache/clear` para forçar rebuild completo do cache.
 
-**Pôsters incorretos:**
-- O parser tenta casar o nome do arquivo com o TMDB; nomes muito modificados podem falhar
-- O cache Redis preserva correspondências — use `/health` para verificar e reinicie se necessário
+**Streams não aparecem:** os links do TorBox são assinados e expiram; reabra o título para gerar novos. Formatos suportados: `.mkv`, `.mp4`, `.avi`, `.mov`, `.m4v`, `.ts`, `.wmv`, `.webm`.
 
-**Streams não aparecem:**
-- Os links do TorBox são assinados e expiram (~10 min); reabra o título para gerar novos
-- Verifique se o arquivo é um formato de vídeo suportado: `.mkv`, `.mp4`, `.avi`, `.mov`, `.m4v`, `.ts`, `.wmv`, `.webm`
-- Se abriu o título por outro addon (usando IMDB ID), o addon tenta a conversão IMDB → TMDB automaticamente
-
-**Usenet não aparece:**
-- Usenet requer plano pago no TorBox; se não estiver disponível no seu plano, o addon ignora silenciosamente
+**Animes nas Séries (ou vice-versa):** a detecção usa TMDB — somente títulos com idioma original japonês + gênero Animation vão para o catálogo de Animes.
 
 ---
 
@@ -282,26 +207,26 @@ Retorna o status do servidor e do cache Redis:
 
 ## English
 
-A Stremio addon that displays your personal **TorBox** catalog (torrents and usenet) with metadata fetched from TMDB.
+A Stremio addon that displays your personal **TorBox** catalog (torrents and usenet) with metadata from TMDB.
 
 ### ✨ Features
 
-- 📂 **Movies, Series & Anime Catalogs** — displays all content downloaded on TorBox in three separate catalogs
-- 🍥 **Anime Catalog** — automatically detected via TMDB (original language Japanese + Animation genre), separated from regular series
+- 📂 **Movies, Series & Anime Catalogs** — three separate catalogs for all your TorBox content
+- 🍥 **Anime Catalog** — auto-detected via TMDB (Japanese original language + Animation genre)
 - 🌐 **TMDB Metadata** — title, synopsis, poster, backdrop, cast, director, trailer and IMDB rating
 - 📅 **Sorting** by date added, release date, or title
 - 🔍 **Search** within your catalog
-- ▶️ **Direct Playback** — clicking a title shows all available versions from TorBox ready to stream in Stremio's player
-- 🎯 **Episode filtering** — the detail screen shows only episodes you actually have in TorBox
-- 📦 **Multi-episode pack support** — files named `S02E02-03` are correctly mapped
-- 🏷️ **Rich stream info** — each stream shows quality (4K/1080p/720p), codec (H.265/H.264/AV1), HDR/Dolby Vision, language (Dubbed/PT-BR/Subbed), audio (Atmos/TrueHD/DTS) and file size
-- 🔀 **Smart stream sorting** — prioritized by PT-BR language → subtitled → quality → size
-- 🔗 **IMDB ID compatibility** — streams work when opening titles from other addons via IMDB ID
-- ⚡ Supports both **Torrents and Usenet** from TorBox
-- 🗄️ **Redis Cache (Upstash)** — persistent cache between requests, serverless-compatible
-- 🔄 **Background refresh** — in self-hosted mode, the catalog updates automatically every 30 minutes
-- 🩺 **`/health` endpoint** — monitor addon and Redis cache status
-- 🐳 **Docker ready** — official image published on GHCR
+- ▶️ **Direct Playback** — streams directly from TorBox CDN
+- 🎯 **Precise episode filtering** — only episodes you actually own are shown (individual episodes, full seasons, or packs)
+- 📦 **Multi-episode pack support** — `S02E02-03` filenames correctly mapped
+- 🏷️ **Rich stream info** — quality (🎞️ 4K / 🎞️ FHD / 💿 HD), codec, HDR/Dolby Vision, source, language, audio, size and release group
+- 🔀 **Smart stream sorting** — PT-BR language → subtitled → quality → size
+- 🔒 **Catalog-only streams** — does not respond to external addon requests (Cinemeta, etc.)
+- ⚡ Supports **Torrents and Usenet**
+- 🗄️ **Redis Cache** — persistent cache with automatic invalidation on new downloads
+- 🔄 **Smart background refresh** — rebuilds catalog only when downloads change
+- 🩺 **`/health` endpoint**
+- 🐳 **Docker ready**
 
 ---
 
@@ -311,33 +236,15 @@ A Stremio addon that displays your personal **TorBox** catalog (torrents and use
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/vinip1250-art/tbmedia)
 
-1. Fork or clone this repository on GitHub
-2. Go to [vercel.com](https://vercel.com) and import the repository
-3. Click **Deploy** (no required environment variables — API keys are configured by the user inside Stremio)
-4. *(Optional)* Set `UPSTASH_REDIS_URL` in environment variables to enable persistent Redis cache
-
-**Addon URL:** `https://your-project.vercel.app`
-
----
+Set `REDIS_URL` optionally for persistent cache. **Addon URL:** `https://your-project.vercel.app`
 
 #### Option 2 — Render (free)
 
-1. Fork this repository on GitHub
-2. Go to [render.com](https://render.com) → New → Web Service
-3. Connect the repository
-4. Render auto-detects `render.yaml`
-5. Click **Create Web Service**
+Fork → [render.com](https://render.com) → New Web Service → connect repo. **Addon URL:** `https://your-project.onrender.com`
 
-**Addon URL:** `https://your-project.onrender.com`
-
-> ⚠️ On Render's free tier, the service sleeps after inactivity. The first request after sleep may take ~30s.
-
----
-
-#### Option 3 — Docker / Self-hosted (recommended for continuous use)
+#### Option 3 — Docker
 
 ```yaml
-# compose.yml
 services:
   tbmedia:
     image: ghcr.io/vinip1250-art/tbmedia:latest
@@ -347,212 +254,58 @@ services:
       - "7860:7860"
     environment:
       - PORT=7860
-      # Optional: enables persistent Redis cache
-      # - UPSTASH_REDIS_URL=rediss://default:xxx@xxx.upstash.io:6379
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:7860/"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      #- CACHE_TTL_CATALOG=3600
+      #- CACHE_TTL_STREAM=21600
+      #- REDIS_URL=rediss://default:password@host.upstash.io:6379
+      #- REDIS_HOST=redis
+      #- REDIS_PORT=6379
+      #- REDIS_PASSWORD=
+      #- REDIS_TLS=false
 ```
 
-```bash
-docker compose up -d
-```
+---
 
-**Addon URL:** `http://your-server:7860`
+### ⚙️ Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `7860` | Server port |
+| `CACHE_TTL_CATALOG` | `3600` | Catalog cache TTL (seconds) |
+| `CACHE_TTL_STREAM` | `21600` | Stream cache TTL (seconds) |
+| `REDIS_URL` | — | Full Redis URL (`redis://` or `rediss://`) |
+| `UPSTASH_REDIS_URL` | — | Alias for `REDIS_URL` (compatibility) |
+| `REDIS_HOST` | — | Redis host (alternative to URL) |
+| `REDIS_PORT` | `6379` | Redis port |
+| `REDIS_PASSWORD` | — | Redis password |
+| `REDIS_TLS` | `false` | Enable TLS (auto-detected for `rediss://` URLs) |
 
 ---
 
-### 🔧 Stremio Configuration
+### 🗄️ Redis Cache
 
-After deploying, install the addon in Stremio:
-
-1. Open Stremio → **Settings** → **Addons**
-2. Paste the configuration URL:
-https://your-project.vercel.app/configure
-3. On the configuration page, fill in:
-- **TorBox API Key** — get it at [torbox.app/settings/api](https://torbox.app/settings/api)
-- **TMDB API Key (v3)** — get it at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
-- **Sort by** — choose between: Date Added, Release Date, Title
-4. Click **Install**
-
-Or install directly via URL:
-stremio://your-project.vercel.app/manifest.json
-
-
----
-
-### 🛠️ Local Development
-
-```bash
-# Install dependencies
-npm install
-
-# Run locally (port 7860)
-npm start
-
-# Or with hot-reload
-npm run dev
-```
-
-Open `http://localhost:7860` to see the manifest.  
-To configure locally, go to: `http://localhost:7860/configure`
-
-> Requires **Node.js >= 24**.
-
----
-
-### 📁 Project Structure
-tbmedia/
-├── index.js # Local entry point (starts server on port 7860)
-├── app.js # Express setup + Stremio addon routes
-├── api/
-│ └── server.js # Serverless entry point (Vercel)
-├── src/
-│ ├── torbox.js # TorBox API integration
-│ ├── tmdb.js # TMDB API integration + IMDB→TMDB conversion
-│ ├── builder.js # Builds catalog, meta, streams + stream scoring
-│ ├── parser.js # Smart filename parser (title, year, season/episode, anime)
-│ └── cache.js # Redis (Upstash) cache layer with graceful fallback
-├── public/
-│ └── tb-files-tmdb-icon.svg # Lightweight SVG addon logo
-├── configure.html # Addon configuration page
-├── Dockerfile # Docker image (node:20-alpine)
-├── compose.yml # Docker Compose for self-hosting
-├── vercel.json # Vercel deployment config
-└── package.json
-
-
----
-
-### 🔑 APIs Used
-
-#### TorBox API
-- `GET /v1/api/torrents/mylist` — lists all torrents
-- `GET /v1/api/usenet/mylist` — lists all usenet downloads
-- `GET /v1/api/torrents/requestdl` — generates direct download link (torrent)
-- `GET /v1/api/usenet/requestdl` — generates direct download link (usenet)
-
-#### TMDB API
-- `GET /search/movie` and `/search/tv` — search by title (with anime detection via `original_language` + `genre_ids`)
-- `GET /movie/{id}` and `/tv/{id}` — full metadata (with `append_to_response=videos,images`)
-- `GET /tv/{id}/season/{n}` — season episodes
-- `GET /tv/{id}/credits` and `/movie/{id}/credits` — cast and crew
-- `GET /tv/{id}/external_ids` — IMDB ID for deep linking
-- `GET /find/{imdb_id}` — convert IMDB ID to TMDB ID
-
----
-
-### ⚙️ How It Works
-Stremio requests catalog
-↓
-Redis Cache → hit? return immediately
-↓ (miss)
-TorBox API → fetches completed downloads (completed/seeding/cached/finalized)
-↓
-Parser → extracts title, year, season/episode, detects anime
-↓
-TMDB API → fetches metadata
-└── anime: validates Japanese original language + Animation genre
-↓
-Separate catalog by type (Movies / Series / Anime) returned to Stremio
-↓
-Redis Cache → stored for 1 hour
-
-─────────────────────────────────────────────────────
-
-User opens a title (meta screen)
-↓
-TMDB API → fetches all episodes for the series
-↓
-TorBox → filters only episodes available in your library
-↓
-Only the episodes you own are displayed
-
-─────────────────────────────────────────────────────
-
-User clicks an episode (streams)
-↓
-TorBox API → lists files in the download (supports multi-ep packs S02E02-03)
-↓
-TorBox API → generates direct signed link for each video file
-↓
-Streams sorted by: PT-BR language → quality (4K/1080p) → file size
-↓
-Stremio plays directly from TorBox CDN (zero proxy bytes)
-
-text
-
----
-
-### 🗄️ Redis Cache (Upstash)
-
-The addon supports Redis caching via [Upstash](https://upstash.com) (free tier available). Set the environment variable:
-UPSTASH_REDIS_URL=rediss://default:YOUR_PASSWORD@xxx.upstash.io:6379
-
-text
-
-| Data | TTL |
+| Data | Default TTL |
 |---|---|
-| Catalog | 1 hour |
-| Metadata (meta) | 24 hours |
-| IMDB → TMDB conversion | 7 days |
-| Manifest | 24 hours |
-| Streams | 10 minutes |
+| Catalog | 1 hour (`CACHE_TTL_CATALOG`) |
+| Streams | 6 hours (`CACHE_TTL_STREAM`) |
+| Metadata | 24 hours |
+| Download hash | 2 hours |
 
-Without Redis, the addon works normally — cache stays in memory only (no persistence between serverless requests on Vercel).
-
----
-
-### 🩺 Health Check
-GET /health
-
-text
-
-Returns server and Redis cache status:
-
-```json
-{
-  "status": "ok",
-  "cache": { "connected": true, "dbsize": 142 },
-  "environment": "self-hosted",
-  "version": "1.4.1"
-}
-```
+**Auto-invalidation:** on every catalog request, a hash of the download list is compared to the cached value. If new files are detected, the catalog cache is invalidated and rebuilt immediately.
 
 ---
 
 ### 🐛 Troubleshooting
 
-**Empty catalog:**
-- Make sure your API keys are correct
-- Confirm that there are **completed** downloads in TorBox (accepted states: `completed`, `seeding`, `cached`, `finalized`)
-- Check `/health` to verify Redis is connected
-- Check server logs for errors
+**Empty catalog:** check API keys and confirm completed downloads in TorBox (`completed`, `seeding`, `cached`, `finalized`).
 
-**Anime showing in Series (or vice versa):**
-- Detection uses TMDB: only titles with Japanese original language + Animation genre go to the Anime catalog
-- If an anime doesn't appear in the correct catalog, the filename may be too modified for the parser to match
+**Wrong episodes showing:** call `/cache/clear` to force a full cache rebuild.
 
-**Wrong posters:**
-- The parser tries to match filenames against TMDB; heavily modified names may fail
-- Redis preserves match results — check `/health` and restart if needed
+**Streams not showing:** TorBox links are signed and expire; reopen the title to generate new ones. Supported formats: `.mkv`, `.mp4`, `.avi`, `.mov`, `.m4v`, `.ts`, `.wmv`, `.webm`.
 
-**Streams not showing:**
-- TorBox links are signed and expire (~10 min); reopen the title to generate new ones
-- Make sure the file is a supported video format: `.mkv`, `.mp4`, `.avi`, `.mov`, `.m4v`, `.ts`, `.wmv`, `.webm`
-- If you opened the title from another addon (via IMDB ID), the addon attempts IMDB → TMDB conversion automatically
-
-**Usenet not showing:**
-- Usenet requires a paid TorBox plan; if unavailable on your plan, the addon silently ignores it
+**Anime in Series (or vice versa):** detection uses TMDB — only titles with Japanese original language + Animation genre go to the Anime catalog.
 
 ---
 
 ### 📄 License
 
 MIT
-
-
-
-
