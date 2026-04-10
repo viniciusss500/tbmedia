@@ -4,36 +4,33 @@ let redis = null;
 let isConnected = false;
 
 function getRedisClient() {
-  if (!redis && process.env.UPSTASH_REDIS_URL) {
-    console.log('[Redis] Inicializando conexão com Upstash...');
-    
-    redis = new Redis(process.env.UPSTASH_REDIS_URL, {
+  if (!redis) {
+    const url      = process.env.REDIS_URL || process.env.UPSTASH_REDIS_URL;
+    const host     = process.env.REDIS_HOST;
+    const port     = parseInt(process.env.REDIS_PORT) || 6379;
+    const password = process.env.REDIS_PASSWORD;
+    const tls      = process.env.REDIS_TLS === 'true' || (url && url.startsWith('rediss://'));
+
+    if (!url && !host) return null;
+
+    const opts = {
       maxRetriesPerRequest: 3,
       enableReadyCheck: false,
       retryStrategy(times) {
-        const delay = Math.min(times * 50, 2000);
-        return delay;
+        if (times > 3) return null;
+        return Math.min(times * 50, 2000);
       },
-      // TLS é obrigatório para Upstash
-      tls: {
-        rejectUnauthorized: false,
-      },
-    });
-    
-    redis.on('error', (err) => {
-      console.error('[Redis] Erro:', err.message);
-      isConnected = false;
-    });
-    
-    redis.on('connect', () => {
-      console.log('[Redis] Conectado ao Upstash');
-      isConnected = true;
-    });
-    
-    redis.on('close', () => {
-      console.log('[Redis] Conexão fechada');
-      isConnected = false;
-    });
+      ...(tls ? { tls: {} } : {}),
+    };
+
+    console.log(`[Redis] Conectando via ${url ? 'URL' : `${host}:${port}`}...`);
+    redis = url
+      ? new Redis(url, opts)
+      : new Redis({ host, port, password, ...opts });
+
+    redis.on('error',   (err) => { console.error('[Redis] Erro:', err.message); isConnected = false; });
+    redis.on('connect', ()    => { console.log('[Redis] Conectado'); isConnected = true; });
+    redis.on('close',   ()    => { console.log('[Redis] Conexão fechada'); isConnected = false; });
   }
   return redis;
 }

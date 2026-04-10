@@ -5,7 +5,12 @@ const TMDB_IMAGE = 'https://image.tmdb.org/t/p';
 
 function tmdbAuth(apiKey) {
   if (!apiKey) return { headers: {}, params: {} };
-  if (apiKey.startsWith('eyJ')) return { headers: { Authorization: `Bearer ${apiKey}` }, params: {} };
+  // TMDB agora aceita apenas Bearer token ou api_key v3
+  // Se começa com 'eyJ' é JWT Bearer, senão é api_key v3
+  if (apiKey.startsWith('eyJ')) {
+    return { headers: { Authorization: `Bearer ${apiKey}` }, params: {} };
+  }
+  // API key v3 vai como parâmetro
   return { headers: {}, params: { api_key: apiKey } };
 }
 
