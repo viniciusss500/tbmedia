@@ -94,14 +94,14 @@ async function buildAndCacheForConfig(token, config) {
       ? [{ key: 'tb', downloads: tbDownloads }, { key: 'rd', downloads: rdDownloads }]
       : [{ key: 'merged', downloads: merged }];
 
-    for (const { key, downloads } of sources) {
-      for (const type of TYPES) {
+    await Promise.all(sources.flatMap(({ key, downloads }) =>
+      TYPES.map(async type => {
         const metas    = await buildCatalog(downloads, tmdbApiKey, type, sortBy, { skip: 0, search: '' }, lang);
         const cacheKey = cache.makeKey('cat', key, type, sortBy, '', (torboxApiKey || rdApiKey).slice(-6), lang);
         await cache.set(cacheKey, { metas }, TTL_CATALOG);
         console.log(`[Cache] ${key}:${type} → ${metas.length} itens`);
-      }
-    }
+      })
+    ));
   } catch (err) {
     console.error('[Cache] Erro:', err.message);
   }
@@ -315,7 +315,7 @@ app.get('/:token/meta/:type/:id.json', async (req, res) => {
 
   const cacheKey = cache.makeKey('meta', 'v2', id, lang);
   const cached   = await cache.get(cacheKey);
-  
+
   if (cached) {
     console.log(`[Meta] Cache hit: ${id} → ${cached.meta?.videos?.length || 0} eps`);
     res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
@@ -324,14 +324,41 @@ app.get('/:token/meta/:type/:id.json', async (req, res) => {
 
   console.log(`[Meta] Building: ${id}`);
   try {
-    const tmdbId = id.split(':')[2];
+    const parts  = id.split(':');
+    const tmdbId = parts[2];
+    const userKey = (torboxApiKey || rdApiKey || '').slice(-6);
+
+    // Para filmes: prefetch do stream em paralelo com buildMeta
+    const streamCacheKey = cache.makeKey('stream', type, tmdbId, '', '', userKey);
+    const streamPrefetch = type === 'movie'
+      ? cache.get(streamCacheKey).then(hit => {
+          if (!hit) buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, undefined, undefined, lang, rdApiKey)
+            .then(streams => cache.set(streamCacheKey, { streams }, TTL_STREAM))
+            .catch(() => {});
+        })
+      : Promise.resolve();
+
     const meta   = await buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey, rdApiKey);
     const result = { meta };
-    
-    await cache.set(cacheKey, result, 86400); // 24 horas
-    
+
+    await Promise.all([
+      cache.set(cacheKey, result, 86400),
+      streamPrefetch,
+    ]);
+
     res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
     res.json(result);
+
+    // Para séries: prefetch dos streams do primeiro episódio em background após responder
+    if (type === 'series' && meta?.videos?.length > 0) {
+      const firstEp = meta.videos[0];
+      const epKey   = cache.makeKey('stream', type, tmdbId, String(firstEp.season), String(firstEp.episode), userKey);
+      cache.get(epKey).then(hit => {
+        if (!hit) buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, String(firstEp.season), String(firstEp.episode), lang, rdApiKey)
+          .then(streams => cache.set(epKey, { streams }, TTL_STREAM))
+          .catch(() => {});
+      }).catch(() => {});
+    }
   } catch (err) {
     console.error('[Meta] Error:', err.message);
     res.json({ meta: null });
