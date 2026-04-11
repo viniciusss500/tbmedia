@@ -1,7 +1,11 @@
 const Redis = require('ioredis');
+const NodeCache = require('node-cache');
 
 let redis = null;
 let isConnected = false;
+
+// Fallback em memória quando Redis não está configurado
+const memCache = new NodeCache({ stdTTL: 3600, checkperiod: 600, useClones: false });
 
 function getRedisClient() {
   if (!redis) {
@@ -38,48 +42,46 @@ function getRedisClient() {
 async function get(key) {
   const client = getRedisClient();
   if (!client) {
-    console.warn('[Cache] Redis não configurado, usando fallback');
+    const val = memCache.get(key);
+    if (val !== undefined) { console.log(`[Cache] MEM HIT → ${key}`); return val; }
     return null;
   }
-  
   try {
     const data = await client.get(key);
     if (!data) return null;
-    
-    const parsed = JSON.parse(data);
     console.log(`[Cache] HIT → ${key}`);
-    return parsed;
+    return JSON.parse(data);
   } catch (err) {
     console.error(`[Cache] Erro ao buscar ${key}:`, err.message);
-    return null;
+    const val = memCache.get(key);
+    return val !== undefined ? val : null;
   }
 }
 
 async function set(key, value, ttl = 3600) {
   const client = getRedisClient();
   if (!client) {
-    console.warn('[Cache] Redis não configurado, usando fallback');
-    return false;
+    memCache.set(key, value, ttl);
+    return true;
   }
-  
   try {
-    const serialized = JSON.stringify(value);
-    await client.setex(key, ttl, serialized);
+    await client.setex(key, ttl, JSON.stringify(value));
     console.log(`[Cache] SET → ${key} (TTL: ${ttl}s)`);
+    memCache.set(key, value, ttl); // espelho em memória para leitura rápida
     return true;
   } catch (err) {
     console.error(`[Cache] Erro ao armazenar ${key}:`, err.message);
+    memCache.set(key, value, ttl);
     return false;
   }
 }
 
 async function del(key) {
+  memCache.del(key);
   const client = getRedisClient();
-  if (!client) return false;
-  
+  if (!client) return true;
   try {
     await client.del(key);
-    console.log(`[Cache] DEL → ${key}`);
     return true;
   } catch (err) {
     console.error(`[Cache] Erro ao deletar ${key}:`, err.message);
@@ -88,13 +90,15 @@ async function del(key) {
 }
 
 async function delPattern(pattern) {
+  // Limpar memCache por padrão
+  const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+  for (const k of memCache.keys()) { if (regex.test(k)) memCache.del(k); }
+
   const client = getRedisClient();
   if (!client) return 0;
-  
   try {
     const keys = await client.keys(pattern);
     if (keys.length === 0) return 0;
-    
     await client.del(...keys);
     console.log(`[Cache] DEL Pattern → ${pattern} (${keys.length} chaves)`);
     return keys.length;

@@ -16,14 +16,26 @@ async function rdGet(path, apiKey, params = {}) {
 }
 
 async function getRealDebridDownloads(apiKey) {
+  // Busca primeira página para saber se há mais
+  const { data: first, error } = await rdGet('/torrents', apiKey, { page: 1, limit: 100 });
+  if (error || !Array.isArray(first) || first.length === 0) return [];
+
+  // Se primeira página já está cheia, buscar páginas adicionais em paralelo (até 10 páginas = 1000 itens)
+  let allPages = [first];
+  if (first.length === 100) {
+    const extraPages = await Promise.all(
+      Array.from({ length: 9 }, (_, i) => rdGet('/torrents', apiKey, { page: i + 2, limit: 100 }))
+    );
+    for (const { data } of extraPages) {
+      if (!Array.isArray(data) || data.length === 0) break;
+      allPages.push(data);
+      if (data.length < 100) break;
+    }
+  }
+
   const items = [];
-  let page = 1;
-
-  while (true) {
-    const { data, error } = await rdGet('/torrents', apiKey, { page, limit: 100 });
-    if (error || !Array.isArray(data) || data.length === 0) break;
-
-    for (const t of data) {
+  for (const page of allPages) {
+    for (const t of page) {
       if (t.status !== 'downloaded') continue;
       items.push({
         id:               t.id,
@@ -37,9 +49,6 @@ async function getRealDebridDownloads(apiKey) {
         _rdHash:          t.hash,
       });
     }
-
-    if (data.length < 100) break;
-    page++;
   }
 
   console.log(`[RD] Downloads: ${items.length} itens`);

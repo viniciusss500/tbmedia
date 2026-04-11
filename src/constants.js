@@ -1,11 +1,14 @@
+// Versão do addon
 const VERSION = '1.4.1';
 
+// Timeouts (ms)
 const TIMEOUTS = {
   TORBOX_API: 20000,
   TMDB_API: 10000,
   STREAM_REQUEST: 10000,
 };
 
+// TTLs de cache (segundos)
 const CACHE_TTL = {
   CATALOG: 3600,        // 1 hora
   META: 86400,          // 24 horas
@@ -14,10 +17,13 @@ const CACHE_TTL = {
   MATCH: 86400,         // 1 dia
 };
 
+// Paginação
 const PAGE_SIZE = 50;
 
+// Concorrência
 const MAX_CONCURRENCY = 20;
 
+// Refresh interval para cache (ms)
 const REFRESH_INTERVAL = 30 * 60 * 1000; // 30 minutos
 
 module.exports = {

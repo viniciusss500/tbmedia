@@ -1,7 +1,10 @@
 const axios = require('axios');
+const NodeCache = require('node-cache');
 
 const TMDB_BASE  = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE = 'https://image.tmdb.org/t/p';
+
+const tmdbCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600, useClones: false });
 
 function tmdbAuth(apiKey) {
   if (!apiKey) return { headers: {}, params: {} };
@@ -30,6 +33,10 @@ async function imdbToTmdb(apiKey, imdbId) {
 }
 
 async function searchMetadata(apiKey, query, type, year, lang = 'pt-BR') {
+  const cacheKey = `search:${type}:${lang}:${query}:${year || ''}`;
+  const cached = tmdbCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const endpoint = type === 'movie' ? '/search/movie' : '/search/tv';
   const auth   = tmdbAuth(apiKey);
   const region = lang.split('-')[1] || 'BR';
@@ -38,12 +45,13 @@ async function searchMetadata(apiKey, query, type, year, lang = 'pt-BR') {
 
   const res = await axios.get(`${TMDB_BASE}${endpoint}`, { headers: auth.headers, params });
   const result = res.data?.results?.[0];
-  if (!result) return null;
+  if (!result) { tmdbCache.set(cacheKey, null); return null; }
 
   result.isJapaneseAnimation =
     result.original_language === 'ja' &&
     (result.genre_ids || []).includes(16);
 
+  tmdbCache.set(cacheKey, result);
   return result;
 }
 
@@ -52,6 +60,7 @@ async function fetchSeasonVideos(auth, tmdbId, season, lang, fallbackPoster) {
     const res = await axios.get(`${TMDB_BASE}/tv/${tmdbId}/season/${season.season_number}`, {
       headers: auth.headers,
       params: { ...auth.params, language: lang },
+      timeout: 8000,
     });
     const eps = res.data?.episodes || [];
     return eps.map(ep => ({
@@ -79,14 +88,18 @@ async function fetchSeasonVideos(auth, tmdbId, season, lang, fallbackPoster) {
 }
 
 async function getMetadata(apiKey, tmdbId, type, lang = 'pt-BR') {
+  const cacheKey = `meta:${type}:${tmdbId}:${lang}`;
+  const cached = tmdbCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const endpoint = type === 'movie' ? `/movie/${tmdbId}` : `/tv/${tmdbId}`;
   const auth = tmdbAuth(apiKey);
   const baseParams = { ...auth.params, language: lang };
 
   const [detailRes, creditsRes, externalRes] = await Promise.allSettled([
-    axios.get(`${TMDB_BASE}${endpoint}`, { headers: auth.headers, params: { ...baseParams, append_to_response: 'videos,images' } }),
-    axios.get(`${TMDB_BASE}${endpoint}/credits`, { headers: auth.headers, params: baseParams }),
-    axios.get(`${TMDB_BASE}${endpoint}/external_ids`, { headers: auth.headers, params: auth.params }),
+    axios.get(`${TMDB_BASE}${endpoint}`, { headers: auth.headers, params: { ...baseParams, append_to_response: 'videos,images' }, timeout: 10000 }),
+    axios.get(`${TMDB_BASE}${endpoint}/credits`, { headers: auth.headers, params: baseParams, timeout: 8000 }),
+    axios.get(`${TMDB_BASE}${endpoint}/external_ids`, { headers: auth.headers, params: auth.params, timeout: 8000 }),
   ]);
 
   const detail   = detailRes.status   === 'fulfilled' ? detailRes.value.data   : null;
@@ -112,7 +125,7 @@ async function getMetadata(apiKey, tmdbId, type, lang = 'pt-BR') {
                || vids.find(v => v.type === 'Trailer' && v.site === 'YouTube');
 
   if (type === 'movie') {
-    return {
+    const result = {
       id: `torbox:movie:${tmdbId}`, tmdbId, imdbId,
       type: 'movie',
       name: detail.title || detail.original_title,
@@ -127,6 +140,8 @@ async function getMetadata(apiKey, tmdbId, type, lang = 'pt-BR') {
       imdbRating: detail.vote_average?.toFixed(1),
       links: imdbId ? [{ name: 'IMDB', category: 'imdb', url: `https://www.imdb.com/title/${imdbId}` }] : [],
     };
+    tmdbCache.set(cacheKey, result);
+    return result;
   } else {
     const rawSeasons = (detail.seasons || []).filter(s => s.season_number > 0);
     const episodeLists = await Promise.all(
@@ -134,7 +149,7 @@ async function getMetadata(apiKey, tmdbId, type, lang = 'pt-BR') {
     );
     const videos = episodeLists.flat();
 
-    return {
+    const result = {
       id: `torbox:series:${tmdbId}`, tmdbId, imdbId,
       type: 'series',
       name: detail.name || detail.original_name,
@@ -150,6 +165,8 @@ async function getMetadata(apiKey, tmdbId, type, lang = 'pt-BR') {
       links: imdbId ? [{ name: 'IMDB', category: 'imdb', url: `https://www.imdb.com/title/${imdbId}` }] : [],
       status: detail.status,
     };
+    tmdbCache.set(cacheKey, result);
+    return result;
   }
 }
 
