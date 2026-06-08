@@ -1,40 +1,11 @@
 const Redis = require('ioredis');
+const NodeCache = require('node-cache');
 
 let redis = null;
 let isConnected = false;
 
-// ── Fallback in-memory cache (quando Redis não configurado) ───────────────────
-const MAX_MEM_ENTRIES = 500;
-const memCache = new Map(); // key → { value, expiresAt }
-
-function memGet(key) {
-  const entry = memCache.get(key);
-  if (!entry) return null;
-  if (Date.now() > entry.expiresAt) { memCache.delete(key); return null; }
-  return entry.value;
-}
-
-function memSet(key, value, ttl) {
-  // Evict oldest entries quando limite atingido
-  if (memCache.size >= MAX_MEM_ENTRIES && !memCache.has(key)) {
-    const firstKey = memCache.keys().next().value;
-    memCache.delete(firstKey);
-  }
-  memCache.set(key, { value, expiresAt: Date.now() + ttl * 1000 });
-}
-
-function memDel(key) { memCache.delete(key); }
-
-function memDelPattern(pattern) {
-  // Converte glob simples (* e ?) para RegExp
-  const re = new RegExp('^' + pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
-  let count = 0;
-  for (const k of memCache.keys()) {
-    if (re.test(k)) { memCache.delete(k); count++; }
-  }
-  return count;
-}
-// ─────────────────────────────────────────────────────────────────────────────
+// Fallback em memória quando Redis não está configurado
+const memCache = new NodeCache({ stdTTL: 3600, checkperiod: 600, useClones: false });
 
 function getRedisClient() {
   if (!redis) {
@@ -70,41 +41,47 @@ function getRedisClient() {
 
 async function get(key) {
   const client = getRedisClient();
-  if (!client) return memGet(key);
-
+  if (!client) {
+    const val = memCache.get(key);
+    if (val !== undefined) { console.log(`[Cache] MEM HIT → ${key}`); return val; }
+    return null;
+  }
   try {
     const data = await client.get(key);
     if (!data) return null;
-    const parsed = JSON.parse(data);
     console.log(`[Cache] HIT → ${key}`);
-    return parsed;
+    return JSON.parse(data);
   } catch (err) {
     console.error(`[Cache] Erro ao buscar ${key}:`, err.message);
-    return null;
+    const val = memCache.get(key);
+    return val !== undefined ? val : null;
   }
 }
 
 async function set(key, value, ttl = 3600) {
   const client = getRedisClient();
-  if (!client) { memSet(key, value, ttl); return true; }
-
+  if (!client) {
+    memCache.set(key, value, ttl);
+    return true;
+  }
   try {
     await client.setex(key, ttl, JSON.stringify(value));
     console.log(`[Cache] SET → ${key} (TTL: ${ttl}s)`);
+    memCache.set(key, value, ttl); // espelho em memória para leitura rápida
     return true;
   } catch (err) {
     console.error(`[Cache] Erro ao armazenar ${key}:`, err.message);
+    memCache.set(key, value, ttl);
     return false;
   }
 }
 
 async function del(key) {
+  memCache.del(key);
   const client = getRedisClient();
-  if (!client) { memDel(key); return true; }
-
+  if (!client) return true;
   try {
     await client.del(key);
-    console.log(`[Cache] DEL → ${key}`);
     return true;
   } catch (err) {
     console.error(`[Cache] Erro ao deletar ${key}:`, err.message);
@@ -112,20 +89,15 @@ async function del(key) {
   }
 }
 
-// FIX: usa SCAN ao invés de KEYS para não bloquear o event loop do Redis
 async function delPattern(pattern) {
+  // Limpar memCache por padrão
+  const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+  for (const k of memCache.keys()) { if (regex.test(k)) memCache.del(k); }
+
   const client = getRedisClient();
-  if (!client) return memDelPattern(pattern);
-
+  if (!client) return 0;
   try {
-    let cursor = '0';
-    const keys = [];
-    do {
-      const [nextCursor, batch] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
-      cursor = nextCursor;
-      keys.push(...batch);
-    } while (cursor !== '0');
-
+    const keys = await client.keys(pattern);
     if (keys.length === 0) return 0;
     await client.del(...keys);
     console.log(`[Cache] DEL Pattern → ${pattern} (${keys.length} chaves)`);
@@ -138,10 +110,11 @@ async function delPattern(pattern) {
 
 async function exists(key) {
   const client = getRedisClient();
-  if (!client) return memGet(key) !== null;
-
+  if (!client) return false;
+  
   try {
-    return (await client.exists(key)) === 1;
+    const result = await client.exists(key);
+    return result === 1;
   } catch (err) {
     console.error(`[Cache] Erro ao verificar ${key}:`, err.message);
     return false;
@@ -151,7 +124,7 @@ async function exists(key) {
 async function expire(key, ttl) {
   const client = getRedisClient();
   if (!client) return false;
-
+  
   try {
     await client.expire(key, ttl);
     return true;
@@ -163,11 +136,12 @@ async function expire(key, ttl) {
 
 async function getStats() {
   const client = getRedisClient();
-  if (!client) return { connected: false, memEntries: memCache.size };
-
+  if (!client) return { connected: false };
+  
   try {
-    const info   = await client.info('stats');
+    const info = await client.info('stats');
     const dbsize = await client.dbsize();
+    
     return {
       connected: isConnected,
       dbsize,
@@ -184,7 +158,7 @@ async function getStats() {
 }
 
 function makeKey(prefix, ...parts) {
-  return `${prefix}:${parts.filter(p => p != null && p !== '').join(':')}`;
+  return `${prefix}:${parts.filter(Boolean).join(':')}`;
 }
 
 module.exports = {
