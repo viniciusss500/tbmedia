@@ -12,8 +12,6 @@ const IS_SERVERLESS = !!process.env.VERCEL;
 const TTL_CATALOG = parseInt(process.env.CACHE_TTL_CATALOG) || 3600;   // padrão 1h
 const TTL_STREAM  = parseInt(process.env.CACHE_TTL_STREAM)  || 21600;  // padrão 6h
 
-// FIX: limite máximo de configs para evitar memory leak em deploys longos
-const MAX_KNOWN_CONFIGS = 200;
 const knownConfigs = IS_SERVERLESS ? null : new Map();
 
 const app = express();
@@ -26,9 +24,7 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res, next) => {
-  // Log sem expor tokens completos
-  const safeUrl = req.url.replace(/\/([A-Za-z0-9_-]{20,})\//g, '/[token]/');
-  console.log(`[REQ] ${req.method} ${safeUrl}`);
+  console.log(`[REQ] ${req.method} ${req.url}`);
   next();
 });
 
@@ -43,7 +39,7 @@ function decodeConfig(str) {
   try {
     const padded   = str + '=='.slice(0, (4 - (str.length % 4)) % 4);
     const standard = padded.replace(/-/g, '+').replace(/_/g, '/');
-    const decoded  = JSON.parse(Buffer.from(standard, 'base64').toString('utf8'));
+    const decoded = JSON.parse(Buffer.from(standard, 'base64').toString('utf8'));
     if (!decoded || typeof decoded !== 'object') return null;
     return decoded;
   } catch { return null; }
@@ -84,9 +80,7 @@ async function buildAndCacheForConfig(token, config) {
     const tbHash  = hashDownloads(tbDownloads);
     const rdHash  = hashDownloads(rdDownloads);
     const newHash = tbHash + '|' + rdHash;
-    // FIX: usa a chave disponível (torbox ou rd) com segurança
-    const userKey = (torboxApiKey || rdApiKey).slice(-6);
-    const hashKey = cache.makeKey('dlhash', userKey);
+    const hashKey = cache.makeKey('dlhash', (torboxApiKey || rdApiKey).slice(-6));
     const oldHash = await cache.get(hashKey);
 
     if (oldHash === newHash) {
@@ -95,32 +89,29 @@ async function buildAndCacheForConfig(token, config) {
     }
     await cache.set(hashKey, newHash, 7200);
 
-    // Salva raw downloads para reutilização em buildMeta/buildStreams
-    await cache.set(cache.makeKey('dlraw', userKey), { tb: tbDownloads, rd: rdDownloads }, 1800);
-
-    const merged  = [...tbDownloads, ...rdDownloads];
-    const sources = rdCatalog === 'separate'
+    const merged   = [...tbDownloads, ...rdDownloads];
+    const sources  = rdCatalog === 'separate'
       ? [{ key: 'tb', downloads: tbDownloads }, { key: 'rd', downloads: rdDownloads }]
       : [{ key: 'merged', downloads: merged }];
 
-    for (const { key, downloads } of sources) {
-      for (const type of TYPES) {
+    await Promise.all(sources.flatMap(({ key, downloads }) =>
+      TYPES.map(async type => {
         const metas    = await buildCatalog(downloads, tmdbApiKey, type, sortBy, { skip: 0, search: '' }, lang);
-        const cacheKey = cache.makeKey('cat', key, type, sortBy, '', userKey, lang);
+        const cacheKey = cache.makeKey('cat', key, type, sortBy, '', (torboxApiKey || rdApiKey).slice(-6), lang);
         await cache.set(cacheKey, { metas }, TTL_CATALOG);
         console.log(`[Cache] ${key}:${type} → ${metas.length} itens`);
-      }
-    }
+      })
+    ));
   } catch (err) {
     console.error('[Cache] Erro:', err.message);
   }
 }
 
 if (!IS_SERVERLESS) {
-  // FIX: executa refreshes um de cada vez (serial) para não sobrecarregar as APIs externas
   setInterval(async () => {
     for (const [token, config] of knownConfigs.entries()) {
-      try { await buildAndCacheForConfig(token, config); } catch {}
+      await buildAndCacheForConfig(token, config).catch(() => {});
+      await new Promise(r => setTimeout(r, 2000));
     }
   }, REFRESH);
 }
@@ -137,8 +128,8 @@ function getBaseManifest(baseUrl) {
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
     logo: getLogoUrl(baseUrl),
     resources: ['catalog', 'meta', 'stream'],
-    types: ['movie', 'series'],
-    idPrefixes: ['torbox:'],
+    types: ['movie', 'series', 'anime'],
+    idPrefixes: ['torbox:', 'tt', 'kitsu:'],
     catalogs: [],
     behaviorHints: { configurable: true, configurationRequired: true },
     configureUrl: `${baseUrl}/configure`,
@@ -162,13 +153,14 @@ function getConfiguredManifest(baseUrl, config = {}) {
       { id: 'torbox-anime',  type: 'series', name: '🍥 TB Media Animes',  extra: [{ name: 'skip' }, { name: 'search' }] },
     );
   } else {
+    // separate
     catalogs.push(
-      { id: 'torbox-movies', type: 'movie',  name: '🎬 TorBox Filmes',       extra: [{ name: 'skip' }, { name: 'search' }] },
-      { id: 'torbox-series', type: 'series', name: '📺 TorBox Séries',        extra: [{ name: 'skip' }, { name: 'search' }] },
-      { id: 'torbox-anime',  type: 'series', name: '🍥 TorBox Animes',        extra: [{ name: 'skip' }, { name: 'search' }] },
-      { id: 'rd-movies',     type: 'movie',  name: '🔴 Real-Debrid Filmes',   extra: [{ name: 'skip' }, { name: 'search' }] },
-      { id: 'rd-series',     type: 'series', name: '🔴 Real-Debrid Séries',   extra: [{ name: 'skip' }, { name: 'search' }] },
-      { id: 'rd-anime',      type: 'series', name: '🔴 Real-Debrid Animes',   extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'torbox-movies', type: 'movie',  name: '🎬 TorBox Filmes', extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'torbox-series', type: 'series', name: '📺 TorBox Séries',  extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'torbox-anime',  type: 'series', name: '🍥 TorBox Animes',  extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'rd-movies',     type: 'movie',  name: '🔴 Real-Debrid Filmes', extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'rd-series',     type: 'series', name: '🔴 Real-Debrid Séries',  extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'rd-anime',      type: 'series', name: '🔴 Real-Debrid Animes',  extra: [{ name: 'skip' }, { name: 'search' }] },
     );
   }
 
@@ -181,10 +173,10 @@ function getConfiguredManifest(baseUrl, config = {}) {
     resources: [
       'catalog',
       'meta',
-      { name: 'stream', types: ['movie', 'series'], idPrefixes: ['torbox:'] },
+      { name: 'stream', types: ['movie', 'series', 'anime'], idPrefixes: ['torbox:', 'tt', 'kitsu:'] },
     ],
-    types: ['movie', 'series'],
-    idPrefixes: ['torbox:'],
+    types: ['movie', 'series', 'anime'],
+    idPrefixes: ['torbox:', 'tt', 'kitsu:'],
     catalogs,
     behaviorHints: { configurable: true },
     stremioAddonsConfig: {
@@ -207,14 +199,7 @@ app.get('/health', async (req, res) => {
   });
 });
 
-// FIX: /cache/clear global agora exige ADMIN_SECRET para evitar DOS por qualquer visitante
 app.post('/cache/clear', async (req, res) => {
-  const secret = process.env.ADMIN_SECRET;
-  if (!secret) return res.status(503).json({ error: 'Endpoint desativado: defina ADMIN_SECRET para habilitá-lo' });
-
-  const provided = req.headers['x-admin-secret'] || req.query.secret;
-  if (!provided || provided !== secret) return res.status(401).json({ error: 'Não autorizado' });
-
   try {
     const deleted = await cache.delPattern('*');
     res.json({ success: true, deleted, message: 'Cache limpo com sucesso' });
@@ -223,17 +208,16 @@ app.post('/cache/clear', async (req, res) => {
   }
 });
 
-// FIX: usa torboxApiKey OU rdApiKey para montar o pattern, evitando crash em configs rd-only
 app.post('/:token/cache/clear', async (req, res) => {
   const config = decodeConfig(req.params.token);
   if (!config) return res.status(400).json({ error: 'Token inválido' });
-
-  const { torboxApiKey, rdApiKey } = config;
-  const userKey = (torboxApiKey || rdApiKey || '');
-  if (!userKey) return res.status(400).json({ error: 'Config sem chave de API' });
-
+  
   try {
-    const pattern = `*${userKey.slice(-6)}*`;
+    const { torboxApiKey, rdApiKey } = config;
+    const userKey = (torboxApiKey || rdApiKey || '').slice(-6);
+    if (!userKey) return res.status(400).json({ error: 'Nenhuma chave configurada' });
+    
+    const pattern = `*${userKey}*`;
     const deleted = await cache.delPattern(pattern);
     res.json({ success: true, deleted, message: 'Cache do usuário limpo' });
   } catch (err) {
@@ -260,13 +244,13 @@ async function handleCatalog(req, res) {
   const { torboxApiKey, rdApiKey, tmdbApiKey, sortBy = 'data_adicao', lang = 'pt-BR', rdCatalog = 'merge' } = config;
   if (!tmdbApiKey || (!torboxApiKey && !rdApiKey)) return res.json({ metas: [] });
 
-  const catalogId   = req.params.catalogId;
+  const catalogId = req.params.catalogId;
   const isRDCatalog = catalogId.startsWith('rd-');
 
   let type;
-  if (catalogId.endsWith('-anime'))        type = 'anime';
-  else if (catalogId.endsWith('-movies'))  type = 'movie';
-  else                                     type = 'series';
+  if (catalogId.endsWith('-anime'))   type = 'anime';
+  else if (catalogId.endsWith('-movies')) type = 'movie';
+  else type = 'series';
 
   const extra  = parseExtra(req.params.extra || '');
   const skip   = parseInt(extra.skip) || 0;
@@ -276,11 +260,6 @@ async function handleCatalog(req, res) {
 
   const token = req.params.token;
   if (!IS_SERVERLESS && !knownConfigs.has(token)) {
-    // FIX: evict entrada mais antiga quando limite atingido
-    if (knownConfigs.size >= MAX_KNOWN_CONFIGS) {
-      const oldestKey = knownConfigs.keys().next().value;
-      knownConfigs.delete(oldestKey);
-    }
     knownConfigs.set(token, config);
     buildAndCacheForConfig(token, config).catch(() => {});
   }
@@ -298,7 +277,7 @@ async function handleCatalog(req, res) {
 
   try {
     const [tbDownloads, rdDownloads] = await Promise.all([
-      torboxApiKey && (!isRDCatalog || rdCatalog === 'merge') ? getTorBoxDownloads(torboxApiKey)  : Promise.resolve([]),
+      torboxApiKey && (!isRDCatalog || rdCatalog === 'merge') ? getTorBoxDownloads(torboxApiKey) : Promise.resolve([]),
       rdApiKey     && (isRDCatalog  || rdCatalog === 'merge') ? getRealDebridDownloads(rdApiKey)  : Promise.resolve([]),
     ]);
 
@@ -311,9 +290,6 @@ async function handleCatalog(req, res) {
       await cache.set(hashKey, newHash, 7200);
       await cache.delPattern(`cat:*${userKey}*`);
     }
-
-    // Persiste raw downloads para reutilização em buildMeta/buildStreams
-    await cache.set(cache.makeKey('dlraw', userKey), { tb: tbDownloads, rd: rdDownloads }, 1800);
 
     const metas  = await buildCatalog(downloads, tmdbApiKey, type, sortBy, { skip, search }, lang);
     console.log(`[Catalog] Built → ${metas.length} metas`);
@@ -352,14 +328,41 @@ app.get('/:token/meta/:type/:id.json', async (req, res) => {
 
   console.log(`[Meta] Building: ${id}`);
   try {
-    const tmdbId = id.split(':')[2];
+    const parts  = id.split(':');
+    const tmdbId = parts[2];
+    const userKey = (torboxApiKey || rdApiKey || '').slice(-6);
+
+    // Para filmes: prefetch do stream em paralelo com buildMeta
+    const streamCacheKey = cache.makeKey('stream', type, tmdbId, '', '', userKey);
+    const streamPrefetch = type === 'movie'
+      ? cache.get(streamCacheKey).then(hit => {
+          if (!hit) buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, undefined, undefined, lang, rdApiKey)
+            .then(streams => cache.set(streamCacheKey, { streams }, TTL_STREAM))
+            .catch(() => {});
+        })
+      : Promise.resolve();
+
     const meta   = await buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey, rdApiKey);
     const result = { meta };
 
-    await cache.set(cacheKey, result, 86400);
+    await Promise.all([
+      cache.set(cacheKey, result, 86400),
+      streamPrefetch,
+    ]);
 
     res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
     res.json(result);
+
+    // Para séries: prefetch dos streams do primeiro episódio em background após responder
+    if (type === 'series' && meta?.videos?.length > 0) {
+      const firstEp = meta.videos[0];
+      const epKey   = cache.makeKey('stream', type, tmdbId, String(firstEp.season), String(firstEp.episode), userKey);
+      cache.get(epKey).then(hit => {
+        if (!hit) buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, String(firstEp.season), String(firstEp.episode), lang, rdApiKey)
+          .then(streams => cache.set(epKey, { streams }, TTL_STREAM))
+          .catch(() => {});
+      }).catch(() => {});
+    }
   } catch (err) {
     console.error('[Meta] Error:', err.message);
     res.json({ meta: null });
@@ -374,14 +377,41 @@ app.get('/:token/stream/:type/:id.json', async (req, res) => {
   if (!tmdbApiKey || (!torboxApiKey && !rdApiKey)) return res.json({ streams: [] });
 
   const { type, id } = req.params;
-  if (!id.startsWith('torbox:')) return res.json({ streams: [] });
+  if (!id.startsWith('torbox:') && !id.startsWith('tt') && !id.startsWith('kitsu:')) {
+    return res.json({ streams: [] });
+  }
 
-  const parts   = id.split(':');
-  const tmdbId  = parts[2];
-  const season  = parts[3];
-  const episode = parts[4];
+  let tmdbId, season, episode;
 
   try {
+    if (id.startsWith('torbox:')) {
+      const parts = id.split(':');
+      tmdbId  = parts[2];
+      season  = parts[3];
+      episode = parts[4];
+    } else if (id.startsWith('tt')) {
+      const parts = id.split(':');
+      const imdbId = parts[0];
+      season = parts[1];
+      episode = parts[2];
+      const { imdbToTmdb } = require('./src/tmdb');
+      const mapped = await imdbToTmdb(tmdbApiKey, imdbId);
+      if (!mapped) return res.json({ streams: [] });
+      tmdbId = mapped.tmdbId;
+    } else if (id.startsWith('kitsu:')) {
+      const parts = id.split(':');
+      const kitsuId = parts[1];
+      episode = parts[2];
+      const axios = require('axios');
+      const kitsuRes = await axios.get(`https://kitsu.io/api/edge/anime/${kitsuId}`, { timeout: 5000 });
+      const title = kitsuRes.data?.data?.attributes?.canonicalTitle;
+      if (!title) return res.json({ streams: [] });
+      const { searchMetadata } = require('./src/tmdb');
+      const search = await searchMetadata(tmdbApiKey, title, 'tv', undefined, lang);
+      if (!search) return res.json({ streams: [] });
+      tmdbId = search.id;
+    }
+
     const userKey        = (torboxApiKey || rdApiKey).slice(-6);
     const streamCacheKey = cache.makeKey('stream', type, tmdbId, season || '', episode || '', userKey);
     const cachedStreams  = await cache.get(streamCacheKey);
