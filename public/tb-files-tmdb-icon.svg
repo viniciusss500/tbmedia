@@ -1,33 +1,38 @@
-<!-- tb-files-tmdb-icon-yellow-green.svg - minimal folder (yellow) + bolt (green) -->
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="TB Files TMDB icon">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <defs>
-    <linearGradient id="bgGrad" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#0B2545"/>
-      <stop offset="1" stop-color="#071833"/>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b0f19" />
+      <stop offset="100%" stop-color="#1e1332" />
     </linearGradient>
-    <linearGradient id="folderGrad" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#FFD54A"/>
-      <stop offset="1" stop-color="#FFC107"/>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa" />
+      <stop offset="100%" stop-color="#6d28d9" />
     </linearGradient>
-    <linearGradient id="boltGrad" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#4CAF50"/>
-      <stop offset="1" stop-color="#2E7D32"/>
+    <linearGradient id="grad2" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f472b6" />
+      <stop offset="100%" stop-color="#9333ea" />
     </linearGradient>
+    <filter id="neon" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
   </defs>
-
-  <!-- background circle for silhouette -->
-  <circle cx="512" cy="512" r="512" fill="url(#bgGrad)"/>
-
-  <!-- large folder -->
-  <g transform="translate(120,240) scale(0.76)">
-    <path d="M40 160 L260 160 L320 220 L760 220 L760 560 L40 560 Z" fill="url(#folderGrad)" stroke="#E6A800" stroke-width="6" stroke-linejoin="round"/>
-    <rect x="60" y="240" width="640" height="300" rx="18" fill="#FFF8E1" opacity="0.06"/>
-    <!-- subtle inner edge -->
-    <path d="M80 260 L720 260" stroke="#E6A800" stroke-width="2" opacity="0.12"/>
+  
+  <rect width="256" height="256" rx="52" fill="url(#bg)" />
+  
+  <g filter="url(#neon)">
+    <!-- Hexagon representing TorBox -->
+    <path d="M128 36 L208 82 L208 174 L128 220 L48 174 L48 82 Z" fill="none" stroke="url(#grad1)" stroke-width="12" stroke-linejoin="round" />
+    
+    <!-- Inner lines mimicking an isometric box -->
+    <path d="M48 82 L128 128 L208 82" fill="none" stroke="url(#grad1)" stroke-width="8" stroke-linejoin="round" />
+    <path d="M128 128 L128 220" stroke="url(#grad1)" stroke-width="8" stroke-linecap="round" />
+    
+    <!-- Play button overlay -->
+    <circle cx="128" cy="116" r="38" fill="url(#grad2)" />
+    <path d="M118 96 L148 116 L118 136 Z" fill="#ffffff" />
   </g>
-
-  <!-- green bolt overlapping folder -->
-  <path d="M560 200 L420 520 L520 520 L440 780 L760 420 L620 420 L700 200 Z"
-        fill="url(#boltGrad)" stroke="#1B5E20" stroke-width="6" stroke-linejoin="round" transform="translate(-40,0) scale(0.9)"/>
-
 </svg>
