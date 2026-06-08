@@ -5,13 +5,26 @@ const TORBOX_BASE = 'https://api.torbox.app/v1/api';
 let usenetUnavailableLogged = false;
 
 async function torboxGet(path, apiKey, params = {}) {
+  if (!apiKey || apiKey.length < 10) {
+    console.error('[TorBox] API key inválida ou ausente');
+    return { error: 'API key inválida', status: 401 };
+  }
+  
   const headers = { Authorization: `Bearer ${apiKey}` };
+  console.log(`[TorBox] Request: ${path} | Key: ...${apiKey.slice(-8)}`);
+  
   try {
-    const res = await axios.get(`${TORBOX_BASE}${path}`, { headers, params, timeout: 15000 });
+    const res = await axios.get(`${TORBOX_BASE}${path}`, { 
+      headers, 
+      params, 
+      timeout: 20000,
+      validateStatus: (status) => status < 500
+    });
     return { data: res.data, status: res.status };
   } catch (err) {
     const status = err.response?.status ?? null;
     const message = err.response?.data?.detail || err.response?.data?.error || err.message;
+    console.error(`[TorBox] Error ${status}: ${message}`);
     return { error: message, status };
   }
 }

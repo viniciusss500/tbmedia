@@ -2,13 +2,18 @@ const express = require('express');
 const path    = require('path');
 const cache   = require('./src/cache');
 const { getTorBoxDownloads } = require('./src/torbox');
+const { getRealDebridDownloads } = require('./src/realdebrid');
 const { buildCatalog, buildMeta, buildStreams } = require('./src/builder');
-const { imdbToTmdb } = require('./src/tmdb');
 
 const ROOT_DIR = path.resolve(__dirname);
 
 const IS_SERVERLESS = !!process.env.VERCEL;
 
+const TTL_CATALOG = parseInt(process.env.CACHE_TTL_CATALOG) || 3600;   // padrão 1h
+const TTL_STREAM  = parseInt(process.env.CACHE_TTL_STREAM)  || 21600;  // padrão 6h
+
+// FIX: limite máximo de configs para evitar memory leak em deploys longos
+const MAX_KNOWN_CONFIGS = 200;
 const knownConfigs = IS_SERVERLESS ? null : new Map();
 
 const app = express();
@@ -21,7 +26,9 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res, next) => {
-  console.log(`[REQ] ${req.method} ${req.url}`);
+  // Log sem expor tokens completos
+  const safeUrl = req.url.replace(/\/([A-Za-z0-9_-]{20,})\//g, '/[token]/');
+  console.log(`[REQ] ${req.method} ${safeUrl}`);
   next();
 });
 
@@ -32,19 +39,26 @@ app.use(express.static(path.join(ROOT_DIR, 'public'), {
 }));
 
 function decodeConfig(str) {
+  if (!str || typeof str !== 'string' || str.length > 2048) return null;
   try {
     const padded   = str + '=='.slice(0, (4 - (str.length % 4)) % 4);
     const standard = padded.replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(Buffer.from(standard, 'base64').toString('utf8'));
+    const decoded  = JSON.parse(Buffer.from(standard, 'base64').toString('utf8'));
+    if (!decoded || typeof decoded !== 'object') return null;
+    return decoded;
   } catch { return null; }
 }
 
 function parseExtra(str) {
   const extra = {};
-  if (!str) return extra;
+  if (!str || typeof str !== 'string' || str.length > 512) return extra;
   str.split('&').forEach(pair => {
     const eq = pair.indexOf('=');
-    if (eq > 0) extra[decodeURIComponent(pair.slice(0, eq))] = decodeURIComponent(pair.slice(eq + 1));
+    if (eq > 0) {
+      const key = decodeURIComponent(pair.slice(0, eq));
+      const val = decodeURIComponent(pair.slice(eq + 1));
+      if (key.length < 50 && val.length < 200) extra[key] = val;
+    }
   });
   return extra;
 }
@@ -52,18 +66,50 @@ function parseExtra(str) {
 const TYPES   = ['movie', 'series', 'anime'];
 const REFRESH = 30 * 60 * 1000;
 
+function hashDownloads(downloads) {
+  return downloads.map(d => d.id).sort().join(',');
+}
+
 async function buildAndCacheForConfig(token, config) {
-  const { torboxApiKey, tmdbApiKey, sortBy = 'data_adicao', lang = 'pt-BR' } = config;
-  if (!torboxApiKey || !tmdbApiKey) return;
+  const { torboxApiKey, rdApiKey, tmdbApiKey, sortBy = 'data_adicao', lang = 'pt-BR', rdCatalog = 'merge' } = config;
+  if (!tmdbApiKey) return;
 
   console.log(`[Cache] Refresh para ...${token.slice(-8)} (${lang})`);
   try {
-    const downloads = await getTorBoxDownloads(torboxApiKey);
-    for (const type of TYPES) {
-      const metas    = await buildCatalog(downloads, tmdbApiKey, type, sortBy, { skip: 0, search: '' }, lang);
-      const cacheKey = cache.makeKey('cat', type, sortBy, '', '0', torboxApiKey.slice(-6), lang);
-      await cache.set(cacheKey, { metas }, 3600); // 1 hora
-      console.log(`[Cache] ${type} → ${metas.length} itens`);
+    const [tbDownloads, rdDownloads] = await Promise.all([
+      torboxApiKey ? getTorBoxDownloads(torboxApiKey) : Promise.resolve([]),
+      rdApiKey     ? getRealDebridDownloads(rdApiKey) : Promise.resolve([]),
+    ]);
+
+    const tbHash  = hashDownloads(tbDownloads);
+    const rdHash  = hashDownloads(rdDownloads);
+    const newHash = tbHash + '|' + rdHash;
+    // FIX: usa a chave disponível (torbox ou rd) com segurança
+    const userKey = (torboxApiKey || rdApiKey).slice(-6);
+    const hashKey = cache.makeKey('dlhash', userKey);
+    const oldHash = await cache.get(hashKey);
+
+    if (oldHash === newHash) {
+      console.log(`[Cache] Downloads inalterados, skip rebuild`);
+      return;
+    }
+    await cache.set(hashKey, newHash, 7200);
+
+    // Salva raw downloads para reutilização em buildMeta/buildStreams
+    await cache.set(cache.makeKey('dlraw', userKey), { tb: tbDownloads, rd: rdDownloads }, 1800);
+
+    const merged  = [...tbDownloads, ...rdDownloads];
+    const sources = rdCatalog === 'separate'
+      ? [{ key: 'tb', downloads: tbDownloads }, { key: 'rd', downloads: rdDownloads }]
+      : [{ key: 'merged', downloads: merged }];
+
+    for (const { key, downloads } of sources) {
+      for (const type of TYPES) {
+        const metas    = await buildCatalog(downloads, tmdbApiKey, type, sortBy, { skip: 0, search: '' }, lang);
+        const cacheKey = cache.makeKey('cat', key, type, sortBy, '', userKey, lang);
+        await cache.set(cacheKey, { metas }, TTL_CATALOG);
+        console.log(`[Cache] ${key}:${type} → ${metas.length} itens`);
+      }
     }
   } catch (err) {
     console.error('[Cache] Erro:', err.message);
@@ -71,9 +117,10 @@ async function buildAndCacheForConfig(token, config) {
 }
 
 if (!IS_SERVERLESS) {
-  setInterval(() => {
+  // FIX: executa refreshes um de cada vez (serial) para não sobrecarregar as APIs externas
+  setInterval(async () => {
     for (const [token, config] of knownConfigs.entries()) {
-      buildAndCacheForConfig(token, config).catch(() => {});
+      try { await buildAndCacheForConfig(token, config); } catch {}
     }
   }, REFRESH);
 }
@@ -85,7 +132,7 @@ function getLogoUrl(baseUrl) {
 function getBaseManifest(baseUrl) {
   return {
     id: 'community.torbox.catalog',
-    version: '1.4.1',
+    version: '1.5.0',
     name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
     logo: getLogoUrl(baseUrl),
@@ -102,25 +149,43 @@ function getBaseManifest(baseUrl) {
   };
 }
 
-function getConfiguredManifest(baseUrl) {
+function getConfiguredManifest(baseUrl, config = {}) {
+  const { rdApiKey, rdCatalog = 'merge' } = config;
+  const hasRD = !!rdApiKey;
+
+  const catalogs = [];
+
+  if (!hasRD || rdCatalog === 'merge') {
+    catalogs.push(
+      { id: 'torbox-movies', type: 'movie',  name: '🎬 TB Media Filmes', extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'torbox-series', type: 'series', name: '📺 TB Media Séries',  extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'torbox-anime',  type: 'series', name: '🍥 TB Media Animes',  extra: [{ name: 'skip' }, { name: 'search' }] },
+    );
+  } else {
+    catalogs.push(
+      { id: 'torbox-movies', type: 'movie',  name: '🎬 TorBox Filmes',       extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'torbox-series', type: 'series', name: '📺 TorBox Séries',        extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'torbox-anime',  type: 'series', name: '🍥 TorBox Animes',        extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'rd-movies',     type: 'movie',  name: '🔴 Real-Debrid Filmes',   extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'rd-series',     type: 'series', name: '🔴 Real-Debrid Séries',   extra: [{ name: 'skip' }, { name: 'search' }] },
+      { id: 'rd-anime',      type: 'series', name: '🔴 Real-Debrid Animes',   extra: [{ name: 'skip' }, { name: 'search' }] },
+    );
+  }
+
   return {
     id: 'community.torbox.catalog',
-    version: '1.4.1',
+    version: '1.5.0',
     name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
     logo: getLogoUrl(baseUrl),
     resources: [
       'catalog',
       'meta',
-      { name: 'stream', types: ['movie', 'series'], idPrefixes: ['torbox:', 'tt'] },
+      { name: 'stream', types: ['movie', 'series'], idPrefixes: ['torbox:'] },
     ],
     types: ['movie', 'series'],
     idPrefixes: ['torbox:'],
-    catalogs: [
-      { id: 'torbox-movies',  type: 'movie',  name: '🎬 TorBox Filmes', extra: [{ name: 'skip' }, { name: 'search' }] },
-      { id: 'torbox-series',  type: 'series', name: '📺 TorBox Series', extra: [{ name: 'skip' }, { name: 'search' }] },
-      { id: 'torbox-anime',   type: 'series', name: '🍥 TorBox Animes',  extra: [{ name: 'skip' }, { name: 'search' }] },
-    ],
+    catalogs,
     behaviorHints: { configurable: true },
     stremioAddonsConfig: {
       issuer: "https://stremio-addons.net",
@@ -138,8 +203,42 @@ app.get('/health', async (req, res) => {
     status: 'ok',
     cache: stats,
     environment: IS_SERVERLESS ? 'serverless' : 'self-hosted',
-    version: '1.4.1',
+    version: '1.5.0',
   });
+});
+
+// FIX: /cache/clear global agora exige ADMIN_SECRET para evitar DOS por qualquer visitante
+app.post('/cache/clear', async (req, res) => {
+  const secret = process.env.ADMIN_SECRET;
+  if (!secret) return res.status(503).json({ error: 'Endpoint desativado: defina ADMIN_SECRET para habilitá-lo' });
+
+  const provided = req.headers['x-admin-secret'] || req.query.secret;
+  if (!provided || provided !== secret) return res.status(401).json({ error: 'Não autorizado' });
+
+  try {
+    const deleted = await cache.delPattern('*');
+    res.json({ success: true, deleted, message: 'Cache limpo com sucesso' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// FIX: usa torboxApiKey OU rdApiKey para montar o pattern, evitando crash em configs rd-only
+app.post('/:token/cache/clear', async (req, res) => {
+  const config = decodeConfig(req.params.token);
+  if (!config) return res.status(400).json({ error: 'Token inválido' });
+
+  const { torboxApiKey, rdApiKey } = config;
+  const userKey = (torboxApiKey || rdApiKey || '');
+  if (!userKey) return res.status(400).json({ error: 'Config sem chave de API' });
+
+  try {
+    const pattern = `*${userKey.slice(-6)}*`;
+    const deleted = await cache.delPattern(pattern);
+    res.json({ success: true, deleted, message: 'Cache do usuário limpo' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.get('/manifest.json', (req, res) => {
@@ -148,54 +247,81 @@ app.get('/manifest.json', (req, res) => {
 });
 
 app.get('/:token/manifest.json', (req, res) => {
-  if (!decodeConfig(req.params.token)) return res.status(400).json({ error: 'Invalid token' });
+  const config = decodeConfig(req.params.token);
+  if (!config) return res.status(400).json({ error: 'Invalid token' });
   res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800, immutable');
-  res.json(getConfiguredManifest(req.protocol + '://' + req.get('host')));
+  res.json(getConfiguredManifest(req.protocol + '://' + req.get('host'), config));
 });
 
 async function handleCatalog(req, res) {
   const config = decodeConfig(req.params.token);
   if (!config) return res.json({ metas: [] });
 
-  const { torboxApiKey, tmdbApiKey, sortBy = 'data_adicao', lang = 'pt-BR' } = config;
-  if (!torboxApiKey || !tmdbApiKey) return res.json({ metas: [] });
+  const { torboxApiKey, rdApiKey, tmdbApiKey, sortBy = 'data_adicao', lang = 'pt-BR', rdCatalog = 'merge' } = config;
+  if (!tmdbApiKey || (!torboxApiKey && !rdApiKey)) return res.json({ metas: [] });
 
-  const catalogId = req.params.catalogId;
+  const catalogId   = req.params.catalogId;
+  const isRDCatalog = catalogId.startsWith('rd-');
+
   let type;
-  if (catalogId === 'torbox-anime')   type = 'anime';
-  else if (catalogId === 'torbox-movies') type = 'movie';
-  else type = 'series';
+  if (catalogId.endsWith('-anime'))        type = 'anime';
+  else if (catalogId.endsWith('-movies'))  type = 'movie';
+  else                                     type = 'series';
 
   const extra  = parseExtra(req.params.extra || '');
   const skip   = parseInt(extra.skip) || 0;
   const search = extra.search || '';
 
-  console.log(`[Catalog] type=${type} skip=${skip} lang=${lang}`);
+  console.log(`[Catalog] catalog=${catalogId} type=${type} skip=${skip} lang=${lang}`);
 
   const token = req.params.token;
   if (!IS_SERVERLESS && !knownConfigs.has(token)) {
+    // FIX: evict entrada mais antiga quando limite atingido
+    if (knownConfigs.size >= MAX_KNOWN_CONFIGS) {
+      const oldestKey = knownConfigs.keys().next().value;
+      knownConfigs.delete(oldestKey);
+    }
     knownConfigs.set(token, config);
     buildAndCacheForConfig(token, config).catch(() => {});
   }
 
-  const cacheKey = cache.makeKey('cat', type, sortBy, search, skip.toString(), torboxApiKey.slice(-6), lang);
+  const userKey  = (torboxApiKey || rdApiKey).slice(-6);
+  const catKey   = rdCatalog === 'separate' ? (isRDCatalog ? 'rd' : 'tb') : 'merged';
+  const cacheKey = cache.makeKey('cat', catKey, type, sortBy, search, skip.toString(), userKey, lang);
   const cached   = await cache.get(cacheKey);
-  
+
   if (cached) {
     console.log(`[Catalog] Cache hit → ${cached.metas.length} items`);
-    res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=21600');
+    res.setHeader('Cache-Control', `public, max-age=${TTL_CATALOG}, stale-while-revalidate=${TTL_CATALOG * 6}`);
     return res.json(cached);
   }
 
   try {
-    const downloads = await getTorBoxDownloads(torboxApiKey);
-    const metas     = await buildCatalog(downloads, tmdbApiKey, type, sortBy, { skip, search }, lang);
+    const [tbDownloads, rdDownloads] = await Promise.all([
+      torboxApiKey && (!isRDCatalog || rdCatalog === 'merge') ? getTorBoxDownloads(torboxApiKey)  : Promise.resolve([]),
+      rdApiKey     && (isRDCatalog  || rdCatalog === 'merge') ? getRealDebridDownloads(rdApiKey)  : Promise.resolve([]),
+    ]);
+
+    const downloads = [...tbDownloads, ...rdDownloads];
+
+    const newHash = hashDownloads(downloads);
+    const hashKey = cache.makeKey('dlhash', userKey);
+    const oldHash = await cache.get(hashKey);
+    if (oldHash !== newHash) {
+      await cache.set(hashKey, newHash, 7200);
+      await cache.delPattern(`cat:*${userKey}*`);
+    }
+
+    // Persiste raw downloads para reutilização em buildMeta/buildStreams
+    await cache.set(cache.makeKey('dlraw', userKey), { tb: tbDownloads, rd: rdDownloads }, 1800);
+
+    const metas  = await buildCatalog(downloads, tmdbApiKey, type, sortBy, { skip, search }, lang);
     console.log(`[Catalog] Built → ${metas.length} metas`);
-    
+
     const result = { metas };
-    await cache.set(cacheKey, result, 3600); // 1 hora
-    
-    res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=21600');
+    await cache.set(cacheKey, result, TTL_CATALOG);
+
+    res.setHeader('Cache-Control', `public, max-age=${TTL_CATALOG}, stale-while-revalidate=${TTL_CATALOG * 6}`);
     res.json(result);
   } catch (err) {
     console.error('[Catalog] Error:', err.message);
@@ -211,25 +337,27 @@ app.get('/:token/meta/:type/:id.json', async (req, res) => {
   const config = decodeConfig(req.params.token);
   if (!config) return res.json({ meta: null });
 
-  const { torboxApiKey, tmdbApiKey, lang = 'pt-BR' } = config;
+  const { torboxApiKey, rdApiKey, tmdbApiKey, lang = 'pt-BR' } = config;
   const { type, id } = req.params;
   if (!tmdbApiKey || !id.startsWith('torbox:')) return res.json({ meta: null });
 
-  const cacheKey = cache.makeKey('meta', id, lang);
+  const cacheKey = cache.makeKey('meta', 'v2', id, lang);
   const cached   = await cache.get(cacheKey);
-  
+
   if (cached) {
+    console.log(`[Meta] Cache hit: ${id} → ${cached.meta?.videos?.length || 0} eps`);
     res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
     return res.json(cached);
   }
 
+  console.log(`[Meta] Building: ${id}`);
   try {
     const tmdbId = id.split(':')[2];
-    const meta   = await buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey);
+    const meta   = await buildMeta(tmdbId, type, tmdbApiKey, lang, torboxApiKey, rdApiKey);
     const result = { meta };
-    
-    await cache.set(cacheKey, result, 86400); // 24 horas
-    
+
+    await cache.set(cacheKey, result, 86400);
+
     res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
     res.json(result);
   } catch (err) {
@@ -242,52 +370,32 @@ app.get('/:token/stream/:type/:id.json', async (req, res) => {
   const config = decodeConfig(req.params.token);
   if (!config) return res.json({ streams: [] });
 
-  const { torboxApiKey, tmdbApiKey, lang = 'pt-BR' } = config;
-  if (!torboxApiKey || !tmdbApiKey) return res.json({ streams: [] });
+  const { torboxApiKey, rdApiKey, tmdbApiKey, lang = 'pt-BR' } = config;
+  if (!tmdbApiKey || (!torboxApiKey && !rdApiKey)) return res.json({ streams: [] });
 
-  let { type, id } = req.params;
-  let tmdbId, season, episode;
+  const { type, id } = req.params;
+  if (!id.startsWith('torbox:')) return res.json({ streams: [] });
 
-  if (id.startsWith('torbox:')) {
-    const parts = id.split(':');
-    tmdbId  = parts[2];
-    season  = parts[3];
-    episode = parts[4];
-  } else if (id.startsWith('tt')) {
-    const parts  = id.split(':');
-    const imdbId = parts[0];
-    season  = parts[1];
-    episode = parts[2];
-
-    console.log(`[Stream] IMDB ID ${imdbId} → buscando TMDB...`);
-    
-    const imdbCacheKey = cache.makeKey('imdb', imdbId);
-    let found = await cache.get(imdbCacheKey);
-    
-    if (!found) {
-      found = await imdbToTmdb(tmdbApiKey, imdbId).catch(() => null);
-      if (found) {
-        await cache.set(imdbCacheKey, found, 604800); // 7 dias
-      }
-    }
-    
-    if (!found) {
-      console.log(`[Stream] IMDB ${imdbId} não encontrado no TMDB`);
-      return res.json({ streams: [] });
-    }
-    
-    tmdbId = found.tmdbId;
-    type   = found.type;
-    console.log(`[Stream] IMDB ${imdbId} → TMDB ${tmdbId} (${type})`);
-  } else {
-    return res.json({ streams: [] });
-  }
+  const parts   = id.split(':');
+  const tmdbId  = parts[2];
+  const season  = parts[3];
+  const episode = parts[4];
 
   try {
-    const streams = await buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, episode, lang);
-    
-    res.setHeader('Cache-Control', 'public, max-age=600, stale-while-revalidate=1800');
-    res.json({ streams });
+    const userKey        = (torboxApiKey || rdApiKey).slice(-6);
+    const streamCacheKey = cache.makeKey('stream', type, tmdbId, season || '', episode || '', userKey);
+    const cachedStreams  = await cache.get(streamCacheKey);
+    if (cachedStreams) {
+      res.setHeader('Cache-Control', `public, max-age=${TTL_STREAM}, stale-while-revalidate=${TTL_STREAM * 2}`);
+      return res.json(cachedStreams);
+    }
+
+    const streams = await buildStreams(torboxApiKey, tmdbApiKey, type, tmdbId, season, episode, lang, rdApiKey);
+    const result  = { streams };
+    await cache.set(streamCacheKey, result, TTL_STREAM);
+
+    res.setHeader('Cache-Control', `public, max-age=${TTL_STREAM}, stale-while-revalidate=${TTL_STREAM * 2}`);
+    res.json(result);
   } catch (err) {
     console.error('[Stream] Error:', err.message);
     res.json({ streams: [] });

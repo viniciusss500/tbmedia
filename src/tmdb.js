@@ -5,8 +5,9 @@ const TMDB_IMAGE = 'https://image.tmdb.org/t/p';
 
 function tmdbAuth(apiKey) {
   if (!apiKey) return { headers: {}, params: {} };
-  if (apiKey.startsWith('eyJ')) return { headers: { Authorization: `Bearer ${apiKey}` }, params: {} };
-  return { headers: {}, params: { api_key: apiKey } };
+  // FIX: ambos os formatos (v3 key e JWT Bearer) são enviados via Authorization header
+  // para evitar que api_key apareça em query strings, logs de acesso e proxies.
+  return { headers: { Authorization: `Bearer ${apiKey}` }, params: {} };
 }
 
 // Converte IMDB ID → { tmdbId, type }

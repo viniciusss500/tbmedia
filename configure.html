@@ -206,6 +206,23 @@
   </div>
 
   <div class="field">
+    <label>Real-Debrid API Key <span style="color:var(--muted);font-weight:400;text-transform:none">(opcional)</span></label>
+    <div class="input-wrap">
+      <input type="password" id="rdApiKey" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" oninput="toggleRdCatalog()" />
+      <button class="toggle-btn" type="button" onclick="toggleVis('rdApiKey',this)">👁</button>
+    </div>
+    <p class="field-hint">Obtenha em <a href="https://real-debrid.com/apitoken" target="_blank">real-debrid.com/apitoken</a></p>
+  </div>
+
+  <div class="field" id="rdCatalogField" style="display:none">
+    <label>Catálogo Real-Debrid</label>
+    <select id="rdCatalog">
+      <option value="merge">🔀 Mesclar com TorBox</option>
+      <option value="separate">📂 Catálogos separados</option>
+    </select>
+  </div>
+
+  <div class="field">
     <label>Ordenar por</label>
     <select id="sortBy">
       <option value="data_adicao">📅 Data de adição (padrão)</option>
@@ -279,9 +296,16 @@
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
   }
 
+  function toggleRdCatalog() {
+    const hasRd = document.getElementById('rdApiKey').value.trim().length > 0;
+    document.getElementById('rdCatalogField').style.display = hasRd ? 'block' : 'none';
+  }
+
   function generate() {
     const torboxApiKey = document.getElementById('torboxApiKey').value.trim();
     const tmdbApiKey   = document.getElementById('tmdbApiKey').value.trim();
+    const rdApiKey     = document.getElementById('rdApiKey').value.trim();
+    const rdCatalog    = document.getElementById('rdCatalog').value;
     const sortBy       = document.getElementById('sortBy').value;
     const lang         = document.getElementById('lang').value;
 
@@ -293,7 +317,10 @@
     });
     if (!valid) return;
 
-    const encoded     = encodeConfig({ torboxApiKey, tmdbApiKey, sortBy, lang });
+    const cfg = { torboxApiKey, tmdbApiKey, sortBy, lang };
+    if (rdApiKey) { cfg.rdApiKey = rdApiKey; cfg.rdCatalog = rdCatalog; }
+
+    const encoded     = encodeConfig(cfg);
     const origin      = window.location.origin;
     const manifestUrl = `${origin}/${encoded}/manifest.json`;
 
