@@ -60,51 +60,63 @@ function parseExtra(str) {
 }
 
 const TYPES   = ['movie', 'series', 'anime'];
-const REFRESH = 30 * 60 * 1000;
+// Intervalo do refresh em background (em ms). Configurável via REFRESH_INTERVAL_MS.
+const REFRESH = parseInt(process.env.REFRESH_INTERVAL_MS) || 30 * 60 * 1000;
+
+// Evita rebuilds simultâneos para o mesmo usuário (mesmo após despertar da
+// instância free do Render, quando `knownConfigs` é recriado).
+const rebuildInflight = new Map();
 
 function hashDownloads(downloads) {
   return downloads.map(d => d.id).sort().join(',');
 }
 
 async function buildAndCacheForConfig(token, config) {
-  const { torboxApiKey, rdApiKey, tmdbApiKey, sortBy = 'data_adicao', lang = 'pt-BR', rdCatalog = 'merge' } = config;
-  if (!tmdbApiKey) return;
+  if (rebuildInflight.has(token)) return rebuildInflight.get(token);
 
-  console.log(`[Cache] Refresh para ...${token.slice(-8)} (${lang})`);
-  try {
-    const [tbDownloads, rdDownloads] = await Promise.all([
-      torboxApiKey ? getTorBoxDownloads(torboxApiKey) : Promise.resolve([]),
-      rdApiKey     ? getRealDebridDownloads(rdApiKey) : Promise.resolve([]),
-    ]);
+  const run = (async () => {
+    const { torboxApiKey, rdApiKey, tmdbApiKey, sortBy = 'data_adicao', lang = 'pt-BR', rdCatalog = 'merge' } = config;
+    if (!tmdbApiKey) return;
 
-    const tbHash  = hashDownloads(tbDownloads);
-    const rdHash  = hashDownloads(rdDownloads);
-    const newHash = tbHash + '|' + rdHash;
-    const hashKey = cache.makeKey('dlhash', (torboxApiKey || rdApiKey).slice(-6));
-    const oldHash = await cache.get(hashKey);
+    console.log(`[Cache] Refresh para ...${token.slice(-8)} (${lang})`);
+    try {
+      const [tbDownloads, rdDownloads] = await Promise.all([
+        torboxApiKey ? getTorBoxDownloads(torboxApiKey) : Promise.resolve([]),
+        rdApiKey     ? getRealDebridDownloads(rdApiKey) : Promise.resolve([]),
+      ]);
 
-    if (oldHash === newHash) {
-      console.log(`[Cache] Downloads inalterados, skip rebuild`);
-      return;
+      const tbHash  = hashDownloads(tbDownloads);
+      const rdHash  = hashDownloads(rdDownloads);
+      const newHash = tbHash + '|' + rdHash;
+      const hashKey = cache.makeKey('dlhash', (torboxApiKey || rdApiKey).slice(-6));
+      const oldHash = await cache.get(hashKey);
+
+      if (oldHash === newHash) {
+        console.log(`[Cache] Downloads inalterados, skip rebuild`);
+        return;
+      }
+      await cache.set(hashKey, newHash, 7200);
+
+      const merged   = [...tbDownloads, ...rdDownloads];
+      const sources  = rdCatalog === 'separate'
+        ? [{ key: 'tb', downloads: tbDownloads }, { key: 'rd', downloads: rdDownloads }]
+        : [{ key: 'merged', downloads: merged }];
+
+      await Promise.all(sources.flatMap(({ key, downloads }) =>
+        TYPES.map(async type => {
+          const metas    = await buildCatalog(downloads, tmdbApiKey, type, sortBy, { skip: 0, search: '' }, lang);
+          const cacheKey = cache.makeKey('cat', key, type, sortBy, '', (torboxApiKey || rdApiKey).slice(-6), lang);
+          await cache.set(cacheKey, { metas }, TTL_CATALOG);
+          console.log(`[Cache] ${key}:${type} → ${metas.length} itens`);
+        })
+      ));
+    } catch (err) {
+      console.error('[Cache] Erro:', err.message);
     }
-    await cache.set(hashKey, newHash, 7200);
+  })().finally(() => rebuildInflight.delete(token));
 
-    const merged   = [...tbDownloads, ...rdDownloads];
-    const sources  = rdCatalog === 'separate'
-      ? [{ key: 'tb', downloads: tbDownloads }, { key: 'rd', downloads: rdDownloads }]
-      : [{ key: 'merged', downloads: merged }];
-
-    await Promise.all(sources.flatMap(({ key, downloads }) =>
-      TYPES.map(async type => {
-        const metas    = await buildCatalog(downloads, tmdbApiKey, type, sortBy, { skip: 0, search: '' }, lang);
-        const cacheKey = cache.makeKey('cat', key, type, sortBy, '', (torboxApiKey || rdApiKey).slice(-6), lang);
-        await cache.set(cacheKey, { metas }, TTL_CATALOG);
-        console.log(`[Cache] ${key}:${type} → ${metas.length} itens`);
-      })
-    ));
-  } catch (err) {
-    console.error('[Cache] Erro:', err.message);
-  }
+  rebuildInflight.set(token, run);
+  return run;
 }
 
 if (!IS_SERVERLESS) {
@@ -123,7 +135,7 @@ function getLogoUrl(baseUrl) {
 function getBaseManifest(baseUrl) {
   return {
     id: 'community.torbox.catalog',
-    version: '1.5.0',
+    version: '1.5.1',
     name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
     logo: getLogoUrl(baseUrl),
@@ -166,7 +178,7 @@ function getConfiguredManifest(baseUrl, config = {}) {
 
   return {
     id: 'community.torbox.catalog',
-    version: '1.5.0',
+    version: '1.5.1',
     name: 'TB Media',
     description: 'Seu catálogo pessoal do TorBox com metadados do TMDB.',
     logo: getLogoUrl(baseUrl),
@@ -195,7 +207,7 @@ app.get('/health', async (req, res) => {
     status: 'ok',
     cache: stats,
     environment: IS_SERVERLESS ? 'serverless' : 'self-hosted',
-    version: '1.5.0',
+    version: '1.5.1',
   });
 });
 

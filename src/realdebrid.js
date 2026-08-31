@@ -1,9 +1,12 @@
 const axios = require('axios');
+const NodeCache = require('node-cache');
 
 const RD_BASE = 'https://api.real-debrid.com/rest/1.0';
 
-
 const infoCache = new Map();
+
+const downloadsCache = new NodeCache({ stdTTL: 120, checkperiod: 60, useClones: false });
+const downloadsInflight = new Map();
 
 async function getRealDebridInfoCached(apiKey, itemId) {
   const key = `${apiKey}:${itemId}`;
@@ -29,7 +32,7 @@ async function rdGet(path, apiKey, params = {}) {
   }
 }
 
-async function getRealDebridDownloads(apiKey) {
+async function fetchRealDebridDownloads(apiKey) {
   // Busca primeira página para saber se há mais
   const { data: first, error } = await rdGet('/torrents', apiKey, { page: 1, limit: 100 });
   if (error || !Array.isArray(first) || first.length === 0) return [];
@@ -69,6 +72,21 @@ async function getRealDebridDownloads(apiKey) {
 
   console.log(`[RD] Downloads: ${items.length} itens`);
   return items;
+}
+
+async function getRealDebridDownloads(apiKey) {
+  const cacheKey = `dl:${apiKey}`;
+  const cached = downloadsCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  if (downloadsInflight.has(cacheKey)) return downloadsInflight.get(cacheKey);
+
+  const p = fetchRealDebridDownloads(apiKey)
+    .then(result => { downloadsCache.set(cacheKey, result); return result; })
+    .finally(() => downloadsInflight.delete(cacheKey));
+
+  downloadsInflight.set(cacheKey, p);
+  return p;
 }
 
 async function getRealDebridFiles(apiKey, itemId) {

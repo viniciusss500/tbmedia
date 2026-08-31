@@ -1,8 +1,18 @@
 const axios = require('axios');
+const NodeCache = require('node-cache');
 
 const TORBOX_BASE = 'https://api.torbox.app/v1/api';
 
 let usenetUnavailableLogged = false;
+
+// Caches curtos em memória para evitar repetir chamadas à API do TorBox
+// dentro do mesmo processo (a instância free do Render perde o cache ao hibernar,
+// então reduzir chamadas duplicadas é essencial para não estourar tráfego de saída).
+const downloadsCache = new NodeCache({ stdTTL: 120, checkperiod: 60, useClones: false });
+const filesCache     = new NodeCache({ stdTTL: 300, checkperiod: 120, useClones: false });
+
+const downloadsInflight = new Map();
+const filesInflight     = new Map();
 
 async function torboxGet(path, apiKey, params = {}) {
   if (!apiKey || apiKey.length < 10) {
@@ -29,7 +39,7 @@ async function torboxGet(path, apiKey, params = {}) {
   }
 }
 
-async function getTorBoxDownloads(apiKey) {
+async function fetchTorBoxDownloads(apiKey) {
   const params = { bypass_cache: false };
 
   const [torrentsResult, usenetResult] = await Promise.all([
@@ -97,27 +107,45 @@ async function getTorBoxDownloads(apiKey) {
   return completed;
 }
 
-async function getTorBoxStreamLink(apiKey, source, itemId, fileId) {
-  const headers = { Authorization: `Bearer ${apiKey}` };
+const TB_DOWNLOADS_TTL = parseInt(process.env.TB_DOWNLOADS_TTL) || 120;
+
+async function getTorBoxDownloads(apiKey) {
+  const cacheKey = `dl:${apiKey}`;
+  const cached = downloadsCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  if (downloadsInflight.has(cacheKey)) return downloadsInflight.get(cacheKey);
+
+  const p = fetchTorBoxDownloads(apiKey)
+    .then(result => { downloadsCache.set(cacheKey, result, TB_DOWNLOADS_TTL); return result; })
+    .finally(() => downloadsInflight.delete(cacheKey));
+
+  downloadsInflight.set(cacheKey, p);
+  return p;
+}
+
+/**
+ * Gera a URL direta de reprodução no TorBox.
+ *
+ * IMPORTANTE: não resolve o link no servidor. Devolvemos a própria URL do
+ * `requestdl` com `redirect=true`; ao reproduzir, o player do Stremio abre essa
+ * URL, o TorBox responde com 302 para o CDN e o vídeo flui TorBox → Stremio,
+ * sem passar pelo servidor do addon (Render). Isso elimina o tráfego de mídia
+ * e as chamadas `requestdl` originadas do Render.
+ */
+function getTorBoxStreamLink(apiKey, source, itemId, fileId) {
   const endpoint = source === 'torrent'
     ? `${TORBOX_BASE}/torrents/requestdl`
     : `${TORBOX_BASE}/usenet/requestdl`;
 
   const params = source === 'torrent'
-    ? { token: apiKey, torrent_id: itemId, file_id: fileId, zip_link: false }
-    : { token: apiKey, usenet_id: itemId,  file_id: fileId, zip_link: false };
+    ? { token: apiKey, torrent_id: itemId, file_id: fileId, zip_link: false, redirect: true }
+    : { token: apiKey, usenet_id: itemId,  file_id: fileId, zip_link: false, redirect: true };
 
-  try {
-    const res = await axios.get(endpoint, { headers, params, timeout: 10000 });
-    return res.data?.data || null;
-  } catch (err) {
-    const s = err.response?.status;
-    console.error(`[TorBox] requestdl erro ${s ?? '?'} (${source} id=${itemId} file=${fileId}): ${err.message}`);
-    return null;
-  }
+  return `${endpoint}?${new URLSearchParams(params).toString()}`;
 }
 
-async function getTorBoxFiles(apiKey, source, itemId) {
+async function fetchTorBoxFiles(apiKey, source, itemId) {
   const headers = { Authorization: `Bearer ${apiKey}` };
   const endpoint = source === 'torrent'
     ? `${TORBOX_BASE}/torrents/mylist`
@@ -137,6 +165,21 @@ async function getTorBoxFiles(apiKey, source, itemId) {
     console.error(`[TorBox] Files erro ${s ?? '?'} (${source} id=${itemId}): ${err.message}`);
     return [];
   }
+}
+
+async function getTorBoxFiles(apiKey, source, itemId) {
+  const cacheKey = `files:${source}:${itemId}`;
+  const cached = filesCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  if (filesInflight.has(cacheKey)) return filesInflight.get(cacheKey);
+
+  const p = fetchTorBoxFiles(apiKey, source, itemId)
+    .then(result => { filesCache.set(cacheKey, result); return result; })
+    .finally(() => filesInflight.delete(cacheKey));
+
+  filesInflight.set(cacheKey, p);
+  return p;
 }
 
 const VIDEO_EXTENSIONS = ['.mkv', '.mp4', '.avi', '.mov', '.m4v', '.ts', '.wmv', '.webm'];

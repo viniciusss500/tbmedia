@@ -115,6 +115,8 @@ docker compose up -d
 | `PORT` | `7860` | Porta do servidor |
 | `CACHE_TTL_CATALOG` | `3600` | TTL do cache de catálogo (segundos) |
 | `CACHE_TTL_STREAM` | `21600` | TTL do cache de streams (segundos) |
+| `REFRESH_INTERVAL_MS` | `1800000` | Intervalo do refresh em background (milissegundos) |
+| `TB_DOWNLOADS_TTL` | `120` | TTL do cache em memória da lista de downloads do TorBox (segundos) |
 | `REDIS_URL` | — | URL completa do Redis (`redis://` ou `rediss://`) |
 | `UPSTASH_REDIS_URL` | — | Alias para `REDIS_URL` (compatibilidade) |
 | `REDIS_HOST` | — | Host do Redis (alternativa à URL) |
@@ -185,7 +187,7 @@ GET /health
   "status": "ok",
   "cache": { "connected": true, "dbsize": 142 },
   "environment": "self-hosted",
-  "version": "1.4.1"
+  "version": "1.5.1"
 }
 ```
 
@@ -272,6 +274,8 @@ services:
 | `PORT` | `7860` | Server port |
 | `CACHE_TTL_CATALOG` | `3600` | Catalog cache TTL (seconds) |
 | `CACHE_TTL_STREAM` | `21600` | Stream cache TTL (seconds) |
+| `REFRESH_INTERVAL_MS` | `1800000` | Background refresh interval (milliseconds) |
+| `TB_DOWNLOADS_TTL` | `120` | In-memory TTL for the TorBox download list (seconds) |
 | `REDIS_URL` | — | Full Redis URL (`redis://` or `rediss://`) |
 | `UPSTASH_REDIS_URL` | — | Alias for `REDIS_URL` (compatibility) |
 | `REDIS_HOST` | — | Redis host (alternative to URL) |
